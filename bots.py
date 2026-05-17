@@ -44,7 +44,7 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# FIXED: Brackets and structure completely checked and closed properly
+# FULLY FIXED BAIT_MAP WITH ALL 15 CHOICES
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -62,6 +62,7 @@ BAIT_MAP = {
     "14": {"files": ["my bait.mp3"], "type": "start"},
     "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"}
 }
+
 class ZeptiV77(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -136,8 +137,10 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 
 @bot.tree.command(name="api")
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
+    # UPDATED: Immediate deferral to permanently fix 10062 Unknown Interaction timeouts
+    await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
-    await interaction.response.send_message(f"✅ Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
+    await interaction.followup.send(f"✅ Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
 @bot.tree.command(name="method")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
@@ -240,8 +243,9 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
     await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
+# UPDATED: Allowed option "15" in the command choices
 @bot.tree.command(name="bait")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14"], audio_file: discord.Attachment):
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"], audio_file: discord.Attachment):
     await interaction.response.defer(); u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
     cfg = BAIT_MAP[choice]
     def run():
