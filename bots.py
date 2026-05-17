@@ -142,8 +142,12 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
 
 @bot.tree.command(name="method")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
-    await interaction.response.defer(ephemeral=True)
-    
+    # Safe protection wrapper against 10062 upload timeouts
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.errors.NotFound:
+        return
+
     class MethodSelect(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
             await i.response.defer()
@@ -158,7 +162,8 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                 
             elif self.values[0] == "copyright":
                 def run_copyright():
-                    subprocess.run(['ffmpeg', '-i', ip, '-filter:a', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', '-strict', '-2', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    # Fixed: Swapped to -af explicit structure with normalized validation layers
+                    subprocess.run(['ffmpeg', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 await asyncio.get_event_loop().run_in_executor(None, run_copyright)
                 await i.followup.send(content="**Method Applied: Copyright Bypass**", file=discord.File(op))
                 
@@ -190,7 +195,11 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
     if interaction.user.id not in AUTH_DATA: 
         return await interaction.response.send_message("❌ Use /api first.", ephemeral=True)
     
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     acc = AUTH_DATA[interaction.user.id]
     raw = await audio_file.read()
     stut = random.randint(50, 200)
@@ -213,7 +222,10 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
 
 @bot.tree.command(name="loudset")
 async def loudset(interaction: discord.Interaction, audio_file: discord.Attachment):
-    await interaction.response.defer(ephemeral=True)
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.errors.NotFound:
+        return
     
     class P(discord.ui.Select):
         async def callback(self, i):
@@ -233,7 +245,11 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
 
 @bot.tree.command(name="macro")
 async def macro(interaction: discord.Interaction, audio_file: discord.Attachment, macro_file: discord.Attachment):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
     macro_text = (await macro_file.read()).decode('utf-8', errors='ignore'); await audio_file.save(ip)
     effects = []
@@ -255,13 +271,15 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
 
 @bot.tree.command(name="pitch")
 async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment, val: float):
-    # FIXED: Swapped out broken pydub spawn rate with exact ffmpeg rubberband / atempo pitch shifting
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"
     await audio_file.save(ip)
     
     def run():
-        # Uses the rubberband high-quality pitch filter natively supported in ffmpeg builds
         subprocess.run([
             'ffmpeg', '-i', ip, 
             '-af', f"rubberband=pitch={val}", 
@@ -274,7 +292,11 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
 
 @bot.tree.command(name="tpos")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
     await bait.save(bp); await main.save(mp)
     def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
@@ -282,7 +304,11 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 
 @bot.tree.command(name="bait")
 async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"], audio_file: discord.Attachment):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
     cfg = BAIT_MAP[choice]
     def run():
@@ -300,7 +326,11 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
 
 @bot.tree.command(name="decalgen")
 async def decalgen(interaction: discord.Interaction, image: discord.Attachment, watermark: Optional[discord.Attachment] = None):
-    await interaction.response.defer()
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
     img_d = await image.read(); wm_d = await watermark.read() if watermark else None
     def proc():
         base = Image.open(BytesIO(img_d)); out = BytesIO(); wm = Image.open(BytesIO(wm_d)).convert('RGBA') if wm_d else None
