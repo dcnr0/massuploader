@@ -255,12 +255,22 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
 
 @bot.tree.command(name="pitch")
 async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment, val: float):
+    # FIXED: Swapped out broken pydub spawn rate with exact ffmpeg rubberband / atempo pitch shifting
     await interaction.response.defer()
-    u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"; await audio_file.save(ip)
+    u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"
+    await audio_file.save(ip)
+    
     def run():
-        s = AudioSegment.from_file(ip)
-        s._spawn(s.raw_data, overrides={'frame_rate': int(s.frame_rate * val)}).set_frame_rate(44100).export(op, format="ogg")
-    await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+        # Uses the rubberband high-quality pitch filter natively supported in ffmpeg builds
+        subprocess.run([
+            'ffmpeg', '-i', ip, 
+            '-af', f"rubberband=pitch={val}", 
+            '-c:a', 'libvorbis', '-q:a', '5', op, '-y'
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+    await asyncio.get_event_loop().run_in_executor(None, run)
+    await interaction.followup.send(file=discord.File(op))
+    [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
 @bot.tree.command(name="tpos")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
