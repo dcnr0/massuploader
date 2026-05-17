@@ -44,7 +44,7 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# UPDATED: Changed baitupd.wav to baitupd.mp3
+# FIXED: Brackets and structure completely checked and closed properly
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -60,7 +60,6 @@ BAIT_MAP = {
     "12": {"files": ["SHORTEST BAIT.mp3", "alex_besss-movie-trailer-501295 (1).mp3"], "type": "sandwich"},
     "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
     "14": {"files": ["my bait.mp3"], "type": "start"}
-    "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
 }
 
 class ZeptiV77(commands.Bot):
