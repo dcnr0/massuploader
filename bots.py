@@ -59,9 +59,9 @@ BAIT_MAP = {
     "11": {"files": ["HUN_Cs's 3rd cinematic bait for hungarian gang.mp3"], "type": "start"},
     "12": {"files": ["SHORTEST BAIT.mp3", "alex_besss-movie-trailer-501295 (1).mp3"], "type": "sandwich"},
     "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
-    "14": {"files": ["my bait.mp3"], "type": "start"}
+    "14": {"files": ["my bait.mp3"], "type": "start"},
+    "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"}
 }
-
 class ZeptiV77(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
