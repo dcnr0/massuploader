@@ -44,7 +44,6 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# FULLY FIXED BAIT_MAP WITH ALL 15 CHOICES
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -137,27 +136,43 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 
 @bot.tree.command(name="api")
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
-    # UPDATED: Immediate deferral to permanently fix 10062 Unknown Interaction timeouts
     await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(f"✅ Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
 @bot.tree.command(name="method")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
+    await interaction.response.defer(ephemeral=True)
+    
     class MethodSelect(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
             await i.response.defer()
             u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
             await audio_file.save(ip)
+            
             if self.values[0] == "8d":
-                def run():
+                def run_8d():
                     subprocess.run(['ffmpeg', '-i', ip, '-af', "aphaser=in_gain=0.6:out_gain=1:delay=2:decay=0.4:speed=0.5:type=t,apulsator=mode=sine:hz=0.2:amount=1", '-c:a', 'libvorbis', '-q:a', '5', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                await asyncio.get_event_loop().run_in_executor(None, run)
+                await asyncio.get_event_loop().run_in_executor(None, run_8d)
                 await i.followup.send(content="**Method Applied: 8D**", file=discord.File(op))
+                
+            elif self.values[0] == "copyright":
+                def run_copyright():
+                    subprocess.run(['ffmpeg', '-i', ip, '-filter:a', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', '-strict', '-2', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                await asyncio.get_event_loop().run_in_executor(None, run_copyright)
+                await i.followup.send(content="**Method Applied: Copyright Bypass**", file=discord.File(op))
+                
             [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-    v = discord.ui.View(); v.add_item(MethodSelect(placeholder="Choose Bypass Method", options=[discord.SelectOption(label="8D Audio", value="8d", description="Title: 8D Effect Bypass")]))
-    await interaction.response.send_message("🛠️ Select Method:", view=v, ephemeral=True)
+    v = discord.ui.View()
+    v.add_item(MethodSelect(
+        placeholder="Choose Bypass Method", 
+        options=[
+            discord.SelectOption(label="8D Audio", value="8d", description="8D Phaser Effect Bypass"),
+            discord.SelectOption(label="Copyright Bypass", value="copyright", description="Multi-stage Asetrate/Atempo Shift")
+        ]
+    ))
+    await interaction.followup.send(content="🛠️ Select Method:", view=v)
 
 @bot.tree.command(name="mp3")
 async def mp3_dl(interaction: discord.Interaction, url: str):
@@ -172,9 +187,14 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
 
 @bot.tree.command(name="massupload")
 async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
-    if interaction.user.id not in AUTH_DATA: return await interaction.response.send_message("❌ Use /api first.", ephemeral=True)
-    await interaction.response.defer(); acc = AUTH_DATA[interaction.user.id]; raw = await audio_file.read()
+    if interaction.user.id not in AUTH_DATA: 
+        return await interaction.response.send_message("❌ Use /api first.", ephemeral=True)
+    
+    await interaction.response.defer()
+    acc = AUTH_DATA[interaction.user.id]
+    raw = await audio_file.read()
     stut = random.randint(50, 200)
+    
     async def task(idx):
         data = await asyncio.get_event_loop().run_in_executor(None, process_audio_bypass, raw, idx, stut)
         d_name = get_preset_title(style, idx, title); h = {"x-api-key": acc["apikey"]}
@@ -187,11 +207,14 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
                 if r.status in [200, 201, 202]: return f"✅ | {d_name}"
                 if r.status == 429: await asyncio.sleep(5)
         return f"❌ | {d_name}"
+        
     res = await asyncio.gather(*[task(i) for i in range(1, 11)])
     await interaction.channel.send("```\n" + "\n".join(res) + "```")
 
 @bot.tree.command(name="loudset")
 async def loudset(interaction: discord.Interaction, audio_file: discord.Attachment):
+    await interaction.response.defer(ephemeral=True)
+    
     class P(discord.ui.Select):
         async def callback(self, i):
             await i.response.defer()
@@ -204,12 +227,14 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
                 AudioSegment.from_file(tw).export(op, format="ogg"); os.remove(tw)
             await asyncio.get_event_loop().run_in_executor(None, proc)
             await i.followup.send(file=discord.File(op)); [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+            
     v = discord.ui.View(); v.add_item(P(options=[discord.SelectOption(label=f"Preset {x}", value=str(x)) for x in range(1,14)]))
-    await interaction.response.send_message("🔊 Select Preset:", view=v, ephemeral=True)
+    await interaction.followup.send(content="🔊 Select Preset:", view=v)
 
 @bot.tree.command(name="macro")
 async def macro(interaction: discord.Interaction, audio_file: discord.Attachment, macro_file: discord.Attachment):
-    await interaction.response.defer(); u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
+    await interaction.response.defer()
+    u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
     macro_text = (await macro_file.read()).decode('utf-8', errors='ignore'); await audio_file.save(ip)
     effects = []
     if 'Compressor:' in macro_text:
@@ -230,7 +255,8 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
 
 @bot.tree.command(name="pitch")
 async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment, val: float):
-    await interaction.response.defer(); u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"; await audio_file.save(ip)
+    await interaction.response.defer()
+    u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"; await audio_file.save(ip)
     def run():
         s = AudioSegment.from_file(ip)
         s._spawn(s.raw_data, overrides={'frame_rate': int(s.frame_rate * val)}).set_frame_rate(44100).export(op, format="ogg")
@@ -238,15 +264,16 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
 
 @bot.tree.command(name="tpos")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
-    await interaction.response.defer(); u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
+    await interaction.response.defer()
+    u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
     await bait.save(bp); await main.save(mp)
     def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
     await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
-# UPDATED: Allowed option "15" in the command choices
 @bot.tree.command(name="bait")
 async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"], audio_file: discord.Attachment):
-    await interaction.response.defer(); u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
+    await interaction.response.defer()
+    u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
     cfg = BAIT_MAP[choice]
     def run():
         m = AudioSegment.from_file(ip)
@@ -263,7 +290,8 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
 
 @bot.tree.command(name="decalgen")
 async def decalgen(interaction: discord.Interaction, image: discord.Attachment, watermark: Optional[discord.Attachment] = None):
-    await interaction.response.defer(); img_d = await image.read(); wm_d = await watermark.read() if watermark else None
+    await interaction.response.defer()
+    img_d = await image.read(); wm_d = await watermark.read() if watermark else None
     def proc():
         base = Image.open(BytesIO(img_d)); out = BytesIO(); wm = Image.open(BytesIO(wm_d)).convert('RGBA') if wm_d else None
         def apply(f):
