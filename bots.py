@@ -23,7 +23,6 @@ def home():
     return "Bot is online and responding to Render health checks."
 
 def run_web_server():
-    # Render automatically injects a PORT environment variable
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
@@ -33,12 +32,10 @@ def keep_alive():
     t.start()
 
 # --- CONFIG & ASSETS ---
-# SECURE: Pulled from Render Environment Variables dashboard
 TOKEN = os.getenv('DISCORD_TOKEN')
 if not TOKEN:
     raise ValueError("CRITICAL: DISCORD_TOKEN environment variable is missing!")
 
-# Setup a relative path for Render hosting compatibility
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SEARCH_DIRS = [
     os.path.join(BASE_DIR, "assets")
@@ -47,9 +44,10 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
+# UPDATED: Changed baitupd.wav to baitupd.mp3
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
-    "2": {"files": ["baitupd.wav"], "type": "start"},
+    "2": {"files": ["baitupd.mp3"], "type": "start"},
     "3": {"files": ["loud audios.ogg"], "type": "start"},
     "4": {"files": ["past final.mp3"], "type": "start"},
     "5": {"files": ["beep bait.mp3"], "type": "start"},
@@ -59,7 +57,10 @@ BAIT_MAP = {
     "9": {"files": ["Cinematic Epic Music by Infraction, 2025 THEME BAIT HUN_CS.mp3"], "type": "start"},
     "10": {"files": ["cinema__a_half_louder.mp3"], "type": "start"},
     "11": {"files": ["HUN_Cs's 3rd cinematic bait for hungarian gang.mp3"], "type": "start"},
-    "12": {"files": ["SHORTEST BAIT.mp3", "alex_besss-movie-trailer-501295 (1).mp3"], "type": "sandwich"}
+    "12": {"files": ["SHORTEST BAIT.mp3", "alex_besss-movie-trailer-501295 (1).mp3"], "type": "sandwich"},
+    "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
+    "14": {"files": ["my bait.mp3"], "type": "start"}
+    "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
 }
 
 class ZeptiV77(commands.Bot):
@@ -241,11 +242,19 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
 @bot.tree.command(name="bait")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12"], audio_file: discord.Attachment):
-    await interaction.response.defer(); u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip); cfg = BAIT_MAP[choice]
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14"], audio_file: discord.Attachment):
+    await interaction.response.defer(); u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
+    cfg = BAIT_MAP[choice]
     def run():
-        m = AudioSegment.from_file(ip); b = AudioSegment.from_file(find_file(cfg["files"][0]))
-        res = (b + m + AudioSegment.from_file(find_file(cfg["files"][1]))) if cfg["type"] == "sandwich" else (b + m)
+        m = AudioSegment.from_file(ip)
+        b = AudioSegment.from_file(find_file(cfg["files"][0]))
+        
+        if cfg.get("type") == "sandwich":
+            b2 = AudioSegment.from_file(find_file(cfg["files"][1]))
+            res = b + m + b2
+        else:
+            res = b + m
+            
         res.export(op, format="ogg")
     await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
@@ -266,5 +275,5 @@ async def decalgen(interaction: discord.Interaction, image: discord.Attachment, 
     buf, name = await asyncio.get_event_loop().run_in_executor(None, proc); buf.seek(0); await interaction.followup.send(file=discord.File(buf, filename=name))
 
 if __name__ == "__main__":
-    keep_alive()  # Fires up Flask web server thread for Render compatibility
+    keep_alive()
     bot.run(TOKEN)
