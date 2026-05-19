@@ -188,13 +188,16 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
 @bot.tree.command(name="mp3")
 async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
-    f = f"m_{get_uid()}.mp3"
+    uid = get_uid()
+    # Let outtmpl be the base name without an explicit extension
+    template_path = f"m_{uid}"
+    final_filename = f"m_{uid}.mp3"
+    
     try:
-        # Fixed: Uses Python's native module execution path directly rather than system bin path
         def dl():
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': f,
+                'outtmpl': template_path,  # Fixed: template base name only
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
@@ -206,8 +209,14 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                 ydl.download([url])
                 
         await asyncio.get_event_loop().run_in_executor(None, dl)
-        await interaction.followup.send(file=discord.File(f))
-        if os.path.exists(f): os.remove(f)
+        
+        # Verify the post-processed file actually exists before trying to send it
+        if os.path.exists(final_filename):
+            await interaction.followup.send(file=discord.File(final_filename))
+            os.remove(final_filename)
+        else:
+            await interaction.followup.send("❌ Conversion finished but output file could not be found.")
+            
     except Exception as e: 
         await interaction.followup.send(f"❌ Failed: {e}")
 
