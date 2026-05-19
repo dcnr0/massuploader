@@ -15,6 +15,14 @@ from typing import Literal, Optional
 from flask import Flask
 from threading import Thread
 
+# --- AUTO-INSTALL YT-DLP IF MISSING ---
+try:
+    import yt_dlp
+except ImportError:
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
+    import yt_dlp
+
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
 
@@ -142,7 +150,6 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
 
 @bot.tree.command(name="method")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
-    # Safe protection wrapper against 10062 upload timeouts
     try:
         await interaction.response.defer(ephemeral=True)
     except discord.errors.NotFound:
@@ -162,7 +169,6 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                 
             elif self.values[0] == "copyright":
                 def run_copyright():
-                    # Fixed: Swapped to -af explicit structure with normalized validation layers
                     subprocess.run(['ffmpeg', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 await asyncio.get_event_loop().run_in_executor(None, run_copyright)
                 await i.followup.send(content="**Method Applied: Copyright Bypass**", file=discord.File(op))
@@ -184,11 +190,26 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     f = f"m_{get_uid()}.mp3"
     try:
-        def dl(): subprocess.run(['yt-dlp', '-x', '--audio-format', 'mp3', '-o', f, url], check=True)
+        # Fixed: Uses Python's native module execution path directly rather than system bin path
+        def dl():
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': f,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+                'quiet': True
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+                
         await asyncio.get_event_loop().run_in_executor(None, dl)
         await interaction.followup.send(file=discord.File(f))
-        os.remove(f)
-    except Exception as e: await interaction.followup.send(f"❌ Failed: {e}")
+        if os.path.exists(f): os.remove(f)
+    except Exception as e: 
+        await interaction.followup.send(f"❌ Failed: {e}")
 
 @bot.tree.command(name="massupload")
 async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
@@ -321,7 +342,10 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
         else:
             res = b + m
             
+        # FIXED: Absolute slice calculation ensures output runs exactly 0.0001 seconds short of 7 minutes (419999ms)
+        res = res[:419999]
         res.export(op, format="ogg")
+        
     await asyncio.get_event_loop().run_in_executor(None, run); await interaction.followup.send(file=discord.File(op)); [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
 @bot.tree.command(name="decalgen")
