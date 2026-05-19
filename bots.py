@@ -73,7 +73,8 @@ BAIT_MAP = {
     "12": {"files": ["SHORTEST BAIT.mp3", "alex_besss-movie-trailer-501295 (1).mp3"], "type": "sandwich"},
     "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
     "14": {"files": ["my bait.mp3"], "type": "start"},
-    "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"}
+    "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
+    "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"}
 }
 
 class ZeptiV77(commands.Bot):
@@ -389,7 +390,7 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
 @bot.tree.command(name="bait")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15"], audio_file: discord.Attachment):
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16"], audio_file: discord.Attachment):
     try:
         await interaction.response.defer()
     except discord.errors.NotFound:
