@@ -310,16 +310,26 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
     await audio_file.save(ip)
     
     def run():
+        # Base standard rate multiplied by your scale factor
+        input_rate = 44100
+        new_rate = int(input_rate * val)
+        
+        # asetrate shifts pitch and speed together; resample back to 44100 so the file structure is standard
         subprocess.run([
             'ffmpeg', '-i', ip, 
-            '-af', f"rubberband=pitch={val}", 
+            '-af', f"asetrate={new_rate},aresample={input_rate}", 
             '-c:a', 'libvorbis', '-q:a', '5', op, '-y'
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
     await asyncio.get_event_loop().run_in_executor(None, run)
-    await interaction.followup.send(file=discord.File(op))
+    
+    if os.path.exists(op):
+        await interaction.followup.send(file=discord.File(op))
+    else:
+        await interaction.followup.send("❌ Pitch processing failed.")
+        
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
-
+    
 @bot.tree.command(name="tpos")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
     try:
