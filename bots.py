@@ -52,7 +52,7 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# Fixed Custom Server Emoji Strings
+# Custom Server Emoji Mappings
 E_LDING = "<:lding:1506253314155614279>"
 E_SUCCESS = "<:success:1506253584050950155>"
 E_FAILED = "<:failed:1506253911005073419>"
