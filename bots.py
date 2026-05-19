@@ -305,27 +305,70 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Massuploading...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Preparing and processing audio variations...")
     acc = AUTH_DATA[interaction.user.id]
     raw = await audio_file.read()
     stut = random.randint(50, 200)
     
-    async def task(idx):
+    # 1. Pre-process all audio permutations sequentially to prevent slamming the CPU core
+    payloads = []
+    for idx in range(1, 11):
+        d_name = get_preset_title(style, idx, title)
+        # Run audio calculations safely in executor
         data = await asyncio.get_event_loop().run_in_executor(None, process_audio_bypass, raw, idx, stut)
-        d_name = get_preset_title(style, idx, title); h = {"x-api-key": acc["apikey"]}
-        ckey = "groupId" if acc["isGroup"] else "userId"
-        for _ in range(100):
-            f = aiohttp.FormData(); p = {"assetType": "Audio", "displayName": d_name, "description": "zepti_W", "creationContext": {"creator": {ckey: acc["targetId"]}}}
+        payloads.append((d_name, data))
+    
+    await status_msg.edit(content=f"{E_LDING} Audio variations generated. Initiating Cloud delivery pipeline...")
+    
+    res = []
+    h = {"x-api-key": acc["apikey"]}
+    ckey = "groupId" if acc["isGroup"] else "userId"
+    
+    # 2. Upload them via a stabilized network queue
+    for d_name, data in payloads:
+        success = False
+        attempts = 0
+        
+        while attempts < 5:  # Cap retries to prevent endless hanging loops
+            attempts += 1
+            
+            # Form data built natively to keep boundaries perfectly clean
+            f = aiohttp.FormData()
+            p = {
+                "assetType": "Audio", 
+                "displayName": d_name, 
+                "description": "zepti_W", 
+                "creationContext": {"creator": {ckey: acc["targetId"]}}
+            }
+            
             f.add_field('request', json.dumps(p), content_type='application/json')
             f.add_field('fileContent', data, filename=f'{get_uid(4)}.mp3', content_type='audio/mpeg')
-            async with bot.session.post("https://apis.roblox.com/assets/v1/assets", data=f, headers=h) as r:
-                if r.status in [200, 201, 202]: return f"{E_SUCCESS} | {d_name}"
-                if r.status == 429: await asyncio.sleep(5)
-        return f"{E_FAILED} | {d_name}"
-        
-    res = await asyncio.gather(*[task(i) for i in range(1, 11)])
-    await status_msg.edit(content=f"{E_SUCCESS} Batch completed.")
-    await interaction.channel.send("```\n" + "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res]) + "```")
+            
+            try:
+                async with bot.session.post("https://apis.roblox.com/assets/v1/assets", data=f, headers=h) as r:
+                    if r.status in [200, 201, 202]:
+                        res.append(f"{E_SUCCESS} | {d_name}")
+                        success = True
+                        break
+                    elif r.status == 429:
+                        # Adaptive backoff delay
+                        await asyncio.sleep(3 * attempts)
+                    else:
+                        # Log error details if it fails due to parameters or permissions
+                        error_text = await r.text()
+                        print(f"[Upload Error] Status {r.status}: {error_text}")
+                        break
+            except Exception as net_err:
+                print(f"[Network Exception]: {net_err}")
+                await asyncio.sleep(2)
+                
+        if not success:
+            res.append(f"{E_FAILED} | {d_name}")
+            
+    # 3. Clean format text output block response
+    await status_msg.edit(content=f"{E_SUCCESS} Massupload tracking complete.")
+    formatted_results = "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res])
+    await interaction.channel.send(f"```\n{formatted_results}\n```")
 
 @bot.tree.command(name="loudset", description="Alters audio using specialized aggressive mastering presets")
 @app_commands.describe(audio_file="The source sound asset to master")
