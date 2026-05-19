@@ -52,7 +52,7 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# Exact Raw Discord Emoji Mappings
+# Fixed Custom Server Emoji Strings
 E_LDING = "<:lding:1506253314155614279>"
 E_SUCCESS = "<:success:1506253584050950155>"
 E_FAILED = "<:failed:1506253911005073419>"
@@ -153,7 +153,7 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
     await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
-    await interaction.followup.send(f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
+    await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
 @bot.tree.command(name="method")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
@@ -165,7 +165,7 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
     class MethodSelect(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
             await i.response.defer()
-            progress_msg = await i.followup.send(f"{E_LDING} Processing...")
+            progress_msg = await i.followup.send(content=f"{E_LDING} Processing...")
             u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
             await audio_file.save(ip)
             
@@ -175,7 +175,7 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                         subprocess.run(['ffmpeg', '-i', ip, '-af', "aphaser=in_gain=0.6:out_gain=1:delay=2:decay=0.4:speed=0.5:type=t,apulsator=mode=sine:hz=0.2:amount=1", '-c:a', 'libvorbis', '-q:a', '5', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await asyncio.get_event_loop().run_in_executor(None, run_8d)
                     if os.path.exists(op):
-                        await progress_msg.edit(content=f"{E_MOD} *8D Audio*")
+                        await progress_msg.edit(content=f"{E_MOD} **8D Audio Activated**")
                         await i.followup.send(file=discord.File(op))
                     else:
                         await progress_msg.edit(content=f"{E_FAILED} Method failed to generate output.")
@@ -185,7 +185,7 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                         subprocess.run(['ffmpeg', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await asyncio.get_event_loop().run_in_executor(None, run_copyright)
                     if os.path.exists(op):
-                        await progress_msg.edit(content=f"{E_MOD} *Copyright Bypass*")
+                        await progress_msg.edit(content=f"{E_MOD} **Copyright Bypass Activated**")
                         await i.followup.send(file=discord.File(op))
                     else:
                         await progress_msg.edit(content=f"{E_FAILED} Method failed to generate output.")
@@ -207,7 +207,7 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
 @bot.tree.command(name="mp3")
 async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     uid = get_uid()
     template_path = f"m_{uid}"
     final_filename = f"m_{uid}.mp3"
@@ -242,14 +242,14 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
 @bot.tree.command(name="massupload")
 async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
     if interaction.user.id not in AUTH_DATA: 
-        return await interaction.response.send_message(f"{E_FAILED} Use /api first.", ephemeral=True)
+        return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
     
     try:
         await interaction.response.defer()
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Massuploading...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Massuploading...")
     acc = AUTH_DATA[interaction.user.id]
     raw = await audio_file.read()
     stut = random.randint(50, 200)
@@ -281,7 +281,7 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
     class P(discord.ui.Select):
         async def callback(self, i):
             await i.response.defer()
-            progress_msg = await i.followup.send(f"{E_LDING} Processing...")
+            progress_msg = await i.followup.send(content=f"{E_LDING} Processing...")
             u = get_uid(); ip, op = f"li_{u}.mp3", f"lo_{u}.ogg"
             await audio_file.save(ip)
             
@@ -294,7 +294,7 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
                 await asyncio.get_event_loop().run_in_executor(None, proc)
                 
                 if os.path.exists(op):
-                    await progress_msg.edit(content=f"{E_MOD} *Loud Preset {self.values[0]}*")
+                    await progress_msg.edit(content=f"{E_MOD} **Loud Preset {self.values[0]} Processed**")
                     await i.followup.send(file=discord.File(op))
                 else:
                     await progress_msg.edit(content=f"{E_FAILED} File generation failed.")
@@ -313,7 +313,7 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
     macro_text = (await macro_file.read()).decode('utf-8', errors='ignore'); await audio_file.save(ip)
     effects = []
@@ -348,7 +348,7 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"
     await audio_file.save(ip)
     
@@ -376,7 +376,7 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
     await bait.save(bp); await main.save(mp)
     def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
@@ -396,7 +396,7 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
     cfg = BAIT_MAP[choice]
     def run():
@@ -427,7 +427,7 @@ async def decalgen(interaction: discord.Interaction, image: discord.Attachment, 
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(f"{E_LDING} Processing...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     img_d = await image.read(); wm_d = await watermark.read() if watermark else None
     def proc():
         base = Image.open(BytesIO(img_d)); out = BytesIO(); wm = Image.open(BytesIO(wm_d)).convert('RGBA') if wm_d else None
