@@ -52,11 +52,11 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# Custom Server Emoji Mappings
-E_LDING = "<:lding:1506253314155614279>"
-E_SUCCESS = "<:success:1506253584050950155>"
-E_FAILED = "<:failed:1506253911005073419>"
-E_MOD = "<:mod:1506254684573270077>"
+# Fixed Application Emoji Formatting (Using App Emoji syntax)
+E_MOD = "<a:mod:1506265969562226738>"
+E_LDING = "<a:lding:1506265760631099452>"
+E_SUCCESS = "<a:success:1506265759452631082>"
+E_FAILED = "<a:failed:1506265787900579994>"
 
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
@@ -397,27 +397,44 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
         return
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
-    u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"; await audio_file.save(ip)
+    u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
+    await audio_file.save(ip)
+    
     cfg = BAIT_MAP[choice]
-    def run():
-        m = AudioSegment.from_file(ip)
-        b = AudioSegment.from_file(find_file(cfg["files"][0]))
+    
+    # Thread-safe async file loader and mixer
+    def run_bait_mixing():
+        main_track = AudioSegment.from_file(ip)
+        
+        # Resolving bait filepaths
+        bait1_path = find_file(cfg["files"][0])
+        if not bait1_path:
+            raise FileNotFoundError(f"Missing base template asset: {cfg['files'][0]}")
+        bait_track1 = AudioSegment.from_file(bait1_path)
         
         if cfg.get("type") == "sandwich":
-            b2 = AudioSegment.from_file(find_file(cfg["files"][1]))
-            res = b + m + b2
+            bait2_path = find_file(cfg["files"][1])
+            if not bait2_path:
+                raise FileNotFoundError(f"Missing end template asset: {cfg['files'][1]}")
+            bait_track2 = AudioSegment.from_file(bait2_path)
+            res = bait_track1 + main_track + bait_track2
         else:
-            res = b + m
+            res = bait_track1 + main_track
             
+        # Hard limits lengths cleanly to avoid oversized payloads
         res = res[:419999]
         res.export(op, format="ogg")
         
-    await asyncio.get_event_loop().run_in_executor(None, run)
-    if os.path.exists(op):
-        await status_msg.edit(content=f"{E_SUCCESS} File mixed cleanly.")
-        await interaction.followup.send(file=discord.File(op))
-    else:
-        await status_msg.edit(content=f"{E_FAILED} Build combination failed.")
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, run_bait_mixing)
+        if os.path.exists(op):
+            await status_msg.edit(content=f"{E_SUCCESS} File mixed cleanly.")
+            await interaction.followup.send(file=discord.File(op))
+        else:
+            await status_msg.edit(content=f"{E_FAILED} Build combination failed.")
+    except Exception as e:
+        await status_msg.edit(content=f"{E_FAILED} Processing failed: {str(e)}")
+        
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
 @bot.tree.command(name="decalgen")
