@@ -156,7 +156,6 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 @bot.tree.command(name="emojiwhitelist", description="Manages the active permission whitelist configuration list for the emoji command")
 @app_commands.describe(action="Whether to add or remove access to the whitelist pool", user="The target discord user profile")
 async def emoji_whitelist_manager(interaction: discord.Interaction, action: Literal["add", "remove"], user: discord.User):
-    # Restricted strictly to the 2 specified primary administrator IDs
     if interaction.user.id not in ADMIN_IDS:
         return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to modify the configuration.", ephemeral=True)
     
@@ -175,7 +174,6 @@ async def emoji_whitelist_manager(interaction: discord.Interaction, action: Lite
 @bot.tree.command(name="emoji", description="Uploads an image or GIF directly to the server's custom emoji list")
 @app_commands.describe(name="The shortcode for the emoji (:name:)", file="Image or GIF file to upload (Max 256KB)")
 async def create_server_emoji(interaction: discord.Interaction, name: str, file: discord.Attachment):
-    # Checks dynamically updated whitelist collection pool
     if interaction.user.id not in ALLOWED_EMOJI_USERS:
         return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to execute this command.", ephemeral=True)
 
@@ -207,6 +205,110 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
     await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
+
+@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track to Roblox Cloud")
+@app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern")
+async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
+    if interaction.user.id not in AUTH_DATA: 
+        return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
+    
+    try:
+        await interaction.response.defer()
+    except discord.errors.NotFound:
+        return
+        
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing audio variation permutations sequentially...")
+    acc = AUTH_DATA[interaction.user.id]
+    raw = await audio_file.read()
+    stut = random.randint(50, 200)
+    
+    # Pre-calculate audio mutations to prevent slamming small CPU allocations
+    payloads = []
+    for idx in range(1, 11):
+        d_name = get_preset_title(style, idx, title)
+        data = await asyncio.get_event_loop().run_in_executor(None, process_audio_bypass, raw, idx, stut)
+        payloads.append((d_name, data))
+    
+    await status_msg.edit(content=f"{E_LDING} Processing calculations done. Initiating sequential Cloud pipeline...")
+    
+    res = []
+    h = {"x-api-key": acc["apikey"]}
+    ckey = "groupId" if acc["isGroup"] else "userId"
+    
+    for d_name, data in payloads:
+        success = False
+        error_reason = "Unknown Error"
+        
+        for attempt in range(1, 4):
+            f = aiohttp.FormData()
+            p = {
+                "assetType": "Audio", 
+                "displayName": d_name, 
+                "description": "zepti_W", 
+                "creationContext": {"creator": {ckey: acc["targetId"]}}
+            }
+            f.add_field('request', json.dumps(p), content_type='application/json')
+            f.add_field('fileContent', data, filename=f'{get_uid(4)}.mp3', content_type='audio/mpeg')
+            
+            try:
+                async with bot.session.post("https://apis.roblox.com/assets/v1/assets", data=f, headers=h) as r:
+                    resp_text = await r.text()
+                    
+                    if r.status in [200, 201, 202]:
+                        try:
+                            resp_json = json.loads(resp_text)
+                            operation_id = resp_json.get("path") or resp_json.get("operationId")
+                            
+                            if operation_id:
+                                # Poll the operation path to check if it actually passed moderation/creation
+                                op_url = f"https://apis.roblox.com/assets/v1/{operation_id}" if not operation_id.startswith("http") else operation_id
+                                checked_ok = False
+                                
+                                for _ in range(6): # Poll 6 times (up to 12 seconds)
+                                    await asyncio.sleep(2)
+                                    async with bot.session.get(op_url, headers=h) as op_r:
+                                        op_text = await op_r.text()
+                                        if op_r.status == 200:
+                                            op_json = json.loads(op_text)
+                                            if op_json.get("done") is True:
+                                                if "error" in op_json:
+                                                    error_reason = f"Cloud Error: {op_json['error'].get('message')}"
+                                                else:
+                                                    checked_ok = True
+                                                break
+                                                
+                                if checked_ok:
+                                    res.append(f"{E_SUCCESS} | {d_name}")
+                                    success = True
+                                    break
+                            else:
+                                # Fallback if operation response formatting changes
+                                res.append(f"{E_SUCCESS} | {d_name}")
+                                success = True
+                                break
+                        except Exception as parse_err:
+                            print(f"[Parse Debug Warning]: {parse_err}")
+                            res.append(f"{E_SUCCESS} | {d_name}")
+                            success = True
+                            break
+                            
+                    elif r.status == 429:
+                        error_reason = "Rate Limited (429)"
+                        await asyncio.sleep(4 * attempt)
+                    else:
+                        error_reason = f"HTTP {r.status} - {resp_text}"
+                        print(f"[Console Diagnostics Log] {d_name} Failed -> Status {r.status}: {resp_text}")
+                        break
+            except Exception as e:
+                error_reason = f"Network Exception: {str(e)}"
+                await asyncio.sleep(2)
+                
+        if not success:
+            res.append(f"{E_FAILED} | {d_name} ({error_reason})")
+            
+    await status_msg.edit(content=f"{E_SUCCESS} Pipeline complete.")
+    formatted_results = "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res])
+    await interaction.channel.send(f"```\n{formatted_results}\n```")
 
 @bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
 @app_commands.describe(audio_file="The source sound asset to process")
@@ -293,82 +395,6 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
             
     except Exception as e: 
         await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
-
-@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track to Roblox Cloud")
-@app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern")
-async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
-    if interaction.user.id not in AUTH_DATA: 
-        return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
-    
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
-        
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Preparing and processing audio variations...")
-    acc = AUTH_DATA[interaction.user.id]
-    raw = await audio_file.read()
-    stut = random.randint(50, 200)
-    
-    # 1. Pre-process all audio permutations sequentially to prevent slamming the CPU core
-    payloads = []
-    for idx in range(1, 11):
-        d_name = get_preset_title(style, idx, title)
-        # Run audio calculations safely in executor
-        data = await asyncio.get_event_loop().run_in_executor(None, process_audio_bypass, raw, idx, stut)
-        payloads.append((d_name, data))
-    
-    await status_msg.edit(content=f"{E_LDING} Audio variations generated. Initiating Cloud delivery pipeline...")
-    
-    res = []
-    h = {"x-api-key": acc["apikey"]}
-    ckey = "groupId" if acc["isGroup"] else "userId"
-    
-    # 2. Upload them via a stabilized network queue
-    for d_name, data in payloads:
-        success = False
-        attempts = 0
-        
-        while attempts < 5:  # Cap retries to prevent endless hanging loops
-            attempts += 1
-            
-            # Form data built natively to keep boundaries perfectly clean
-            f = aiohttp.FormData()
-            p = {
-                "assetType": "Audio", 
-                "displayName": d_name, 
-                "description": "zepti_W", 
-                "creationContext": {"creator": {ckey: acc["targetId"]}}
-            }
-            
-            f.add_field('request', json.dumps(p), content_type='application/json')
-            f.add_field('fileContent', data, filename=f'{get_uid(4)}.mp3', content_type='audio/mpeg')
-            
-            try:
-                async with bot.session.post("https://apis.roblox.com/assets/v1/assets", data=f, headers=h) as r:
-                    if r.status in [200, 201, 202]:
-                        res.append(f"{E_SUCCESS} | {d_name}")
-                        success = True
-                        break
-                    elif r.status == 429:
-                        # Adaptive backoff delay
-                        await asyncio.sleep(3 * attempts)
-                    else:
-                        # Log error details if it fails due to parameters or permissions
-                        error_text = await r.text()
-                        print(f"[Upload Error] Status {r.status}: {error_text}")
-                        break
-            except Exception as net_err:
-                print(f"[Network Exception]: {net_err}")
-                await asyncio.sleep(2)
-                
-        if not success:
-            res.append(f"{E_FAILED} | {d_name}")
-            
-    # 3. Clean format text output block response
-    await status_msg.edit(content=f"{E_SUCCESS} Massupload tracking complete.")
-    formatted_results = "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res])
-    await interaction.channel.send(f"```\n{formatted_results}\n```")
 
 @bot.tree.command(name="loudset", description="Alters audio using specialized aggressive mastering presets")
 @app_commands.describe(audio_file="The source sound asset to master")
