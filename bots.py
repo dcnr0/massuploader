@@ -52,7 +52,7 @@ SEARCH_DIRS = [
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
 
-# Fixed Application Emoji Formatting (Using App Emoji syntax)
+# Fixed Application Emoji Formatting
 E_MOD = "<a:mod:1506265969562226738>"
 E_LDING = "<a:lding:1506265760631099452>"
 E_SUCCESS = "<a:success:1506265759452631082>"
@@ -149,13 +149,43 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 
 # --- BOT COMMANDS ---
 
-@bot.tree.command(name="api")
+@bot.tree.command(name="emoji", description="Instantly uploads an image or GIF file directly into the server's custom emoji list")
+@app_commands.describe(name="The shortcode string for using the emoji (:name:)", file="The raw image or animated GIF file to upload (Max 256KB)")
+async def create_server_emoji(interaction: discord.Interaction, name: str, file: discord.Attachment):
+    if not interaction.guild:
+        return await interaction.response.send_message(content=f"{E_FAILED} This command can only be executed within a guild server.", ephemeral=True)
+    
+    if not interaction.user.guild_permissions.manage_expressions and not interaction.user.guild_permissions.manage_emojis_and_stickers:
+        return await interaction.response.send_message(content=f"{E_FAILED} You require 'Manage Expressions' permissions to execute this.", ephemeral=True)
+        
+    bot_member = interaction.guild.me
+    if not bot_member.guild_permissions.manage_expressions and not bot_member.guild_permissions.manage_emojis_and_stickers:
+        return await interaction.response.send_message(content=f"{E_FAILED} I do not have the 'Manage Expressions' permission in this server.", ephemeral=True)
+
+    await interaction.response.defer()
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing image payload configurations...")
+
+    if file.size > 256000:
+         return await status_msg.edit(content=f"{E_FAILED} Upload layout rejected. Discord limits expression emojis to 256KB max.")
+
+    try:
+        img_bytes = await file.read()
+        new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes, reason=f"Created by {interaction.user}")
+        await status_msg.edit(content=f"{E_SUCCESS} Emoji uploaded successfully! Created: {new_emoji}")
+    except discord.HTTPException as err:
+        await status_msg.edit(content=f"{E_FAILED} Server registration dropped: {str(err)}")
+    except Exception as e:
+        await status_msg.edit(content=f"{E_FAILED} System Exception running configuration: {str(e)}")
+
+@bot.tree.command(name="api", description="Links your Roblox Open Cloud API Key and target destination ID configuration parameters")
+@app_commands.describe(key="Your Roblox Open Cloud Asset API Key", target_id="The User ID or Group ID destination", is_group="Set to True if target ID belongs to a Group")
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
     await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
-@bot.tree.command(name="method")
+@bot.tree.command(name="method", description="Processes an audio file through multi-stage complex phase or distortion bypass loops")
+@app_commands.describe(audio_file="The source sound asset to process")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
     try:
         await interaction.response.defer(ephemeral=True)
@@ -204,7 +234,8 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
     ))
     await interaction.followup.send(content=f"{E_MOD} Select Method:", view=v)
 
-@bot.tree.command(name="mp3")
+@bot.tree.command(name="mp3", description="Downloads external web audio links directly and scraps/extracts them cleanly into an MP3 file")
+@app_commands.describe(url="The web or video streaming url link to extract audio from")
 async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
@@ -239,7 +270,8 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     except Exception as e: 
         await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
-@bot.tree.command(name="massupload")
+@bot.tree.command(name="massupload", description="Runs structural variations of an audio asset and batch uploads 10 copies into Roblox cloud")
+@app_commands.describe(audio_file="Sound file asset to replicate and upload", title="Base display name configuration string", style="Title randomized modifier generation style pattern")
 async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
     if interaction.user.id not in AUTH_DATA: 
         return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
@@ -271,7 +303,8 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
     await status_msg.edit(content=f"{E_SUCCESS} Batch completed.")
     await interaction.channel.send("```\n" + "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res]) + "```")
 
-@bot.tree.command(name="loudset")
+@bot.tree.command(name="loudset", description="Alters audio assets utilizing specialized aggressive compressor and EQ mastering presets")
+@app_commands.describe(audio_file="The source file to modify with mastering presets")
 async def loudset(interaction: discord.Interaction, audio_file: discord.Attachment):
     try:
         await interaction.response.defer(ephemeral=True)
@@ -306,7 +339,8 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
     v = discord.ui.View(); v.add_item(P(options=[discord.SelectOption(label=f"Preset {x}", value=str(x)) for x in range(1,14)]))
     await interaction.followup.send(content=f"{E_MOD} Select Preset:", view=v)
 
-@bot.tree.command(name="macro")
+@bot.tree.command(name="macro", description="Parses raw exported Audacity macro TXT layouts and maps structural properties onto a target file")
+@app_commands.describe(audio_file="Target sound asset file", macro_file="The exported text macro layout file from Audacity (.txt)")
 async def macro(interaction: discord.Interaction, audio_file: discord.Attachment, macro_file: discord.Attachment):
     try:
         await interaction.response.defer()
@@ -341,7 +375,8 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
         await status_msg.edit(content=f"{E_FAILED} Macro application failed.")
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-@bot.tree.command(name="pitch")
+@bot.tree.command(name="pitch", description="Shifts the rate frequency speed of an audio file without dropping consistency structures")
+@app_commands.describe(audio_file="The source file sound asset to modify", val="Pitch/Speed multiplier factor (e.g. 1.05 for slight increase, 0.90 for lower)")
 async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment, val: float):
     try:
         await interaction.response.defer()
@@ -369,7 +404,8 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
         await status_msg.edit(content=f"{E_FAILED} Pitch alteration failed.")
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-@bot.tree.command(name="tpos")
+@bot.tree.command(name="tpos", description="Conjoins a bait introductory segment cleanly in front of a primary source file")
+@app_commands.describe(bait="The introductory sound file asset to inject first", main="The primary track sound file asset to follow behind")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
     try:
         await interaction.response.defer()
@@ -389,7 +425,8 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
         await status_msg.edit(content=f"{E_FAILED} Injection build failed.")
     [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
-@bot.tree.command(name="bait")
+@bot.tree.command(name="bait", description="Mixes a sound track directly into an pre-existing template option path context")
+@app_commands.describe(choice="The specific index ID path mapping configuration to combine with", audio_file="Your target main audio sound file track")
 async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16"], audio_file: discord.Attachment):
     try:
         await interaction.response.defer()
@@ -402,11 +439,8 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
     
     cfg = BAIT_MAP[choice]
     
-    # Thread-safe async file loader and mixer
     def run_bait_mixing():
         main_track = AudioSegment.from_file(ip)
-        
-        # Resolving bait filepaths
         bait1_path = find_file(cfg["files"][0])
         if not bait1_path:
             raise FileNotFoundError(f"Missing base template asset: {cfg['files'][0]}")
@@ -421,7 +455,6 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
         else:
             res = bait_track1 + main_track
             
-        # Hard limits lengths cleanly to avoid oversized payloads
         res = res[:419999]
         res.export(op, format="ogg")
         
@@ -437,7 +470,8 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
         
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-@bot.tree.command(name="decalgen")
+@bot.tree.command(name="decalgen", description="Processes image dimensions to a perfect 1080x1080 canvas format and renders optional watermark overlays")
+@app_commands.describe(image="The target primary graphic file or animated GIF asset", watermark="Optional layout overlay graphic to map onto the bottom right")
 async def decalgen(interaction: discord.Interaction, image: discord.Attachment, watermark: Optional[discord.Attachment] = None):
     try:
         await interaction.response.defer()
