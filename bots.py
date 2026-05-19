@@ -46,7 +46,7 @@ if not TOKEN:
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SEARCH_DIRS = [
-    os.path.join(BASE_DIR, "assets")
+    os.path.join(d, "assets") if os.path.isdir(os.path.join(BASE_DIR, "assets")) else BASE_DIR for d in [BASE_DIR]
 ]
 
 AUTH_DATA = {} 
@@ -57,6 +57,10 @@ E_MOD = "<a:mod:1506265969562226738>"
 E_LDING = "<a:lding:1506265760631099452>"
 E_SUCCESS = "<a:success:1506265759452631082>"
 E_FAILED = "<a:failed:1506265787900579994>"
+
+# Dynamic Whitelist initialized with the two core administrator IDs
+ALLOWED_EMOJI_USERS = {1317324380291862659, 1495521117115256962}
+ADMIN_IDS = {1317324380291862659, 1495521117115256962}
 
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
@@ -149,14 +153,34 @@ def process_audio_bypass(audio_bytes, index, stutter_ms):
 
 # --- BOT COMMANDS ---
 
+@bot.tree.command(name="emojiwhitelist", description="Manages the active permission whitelist configuration list for the emoji command")
+@app_commands.describe(action="Whether to add or remove access to the whitelist pool", user="The target discord user profile")
+async def emoji_whitelist_manager(interaction: discord.Interaction, action: Literal["add", "remove"], user: discord.User):
+    # Restricted strictly to the 2 specified primary administrator IDs
+    if interaction.user.id not in ADMIN_IDS:
+        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to modify the configuration.", ephemeral=True)
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    if action == "add":
+        ALLOWED_EMOJI_USERS.add(user.id)
+        await interaction.followup.send(content=f"{E_SUCCESS} Granted permission pool access: **{user.name}** (`{user.id}`) can now use /emoji.", ephemeral=True)
+    elif action == "remove":
+        if user.id in ADMIN_IDS:
+            return await interaction.followup.send(content=f"{E_FAILED} Safeguard Override: Primary administrator IDs cannot be removed from the configuration list.", ephemeral=True)
+        
+        ALLOWED_EMOJI_USERS.discard(user.id)
+        await interaction.followup.send(content=f"{E_SUCCESS} Revoked permission pool access: **{user.name}** (`{user.id}`) can no longer use /emoji.", ephemeral=True)
+
 @bot.tree.command(name="emoji", description="Uploads an image or GIF directly to the server's custom emoji list")
 @app_commands.describe(name="The shortcode for the emoji (:name:)", file="Image or GIF file to upload (Max 256KB)")
 async def create_server_emoji(interaction: discord.Interaction, name: str, file: discord.Attachment):
+    # Checks dynamically updated whitelist collection pool
+    if interaction.user.id not in ALLOWED_EMOJI_USERS:
+        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to execute this command.", ephemeral=True)
+
     if not interaction.guild:
         return await interaction.response.send_message(content=f"{E_FAILED} This command can only be executed within a server.", ephemeral=True)
-    
-    if not interaction.user.guild_permissions.manage_expressions and not interaction.user.guild_permissions.manage_emojis_and_stickers:
-        return await interaction.response.send_message(content=f"{E_FAILED} You require 'Manage Expressions' permissions to execute this.", ephemeral=True)
         
     bot_member = interaction.guild.me
     if not bot_member.guild_permissions.manage_expressions and not bot_member.guild_permissions.manage_emojis_and_stickers:
@@ -170,7 +194,7 @@ async def create_server_emoji(interaction: discord.Interaction, name: str, file:
 
     try:
         img_bytes = await file.read()
-        new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes, reason=f"Created by {interaction.user}")
+        new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes, reason=f"Created by whitelist user: {interaction.user}")
         await status_msg.edit(content=f"{E_SUCCESS} Emoji uploaded successfully! Created: {new_emoji}")
     except discord.HTTPException as err:
         await status_msg.edit(content=f"{E_FAILED} Server registration dropped: {str(err)}")
