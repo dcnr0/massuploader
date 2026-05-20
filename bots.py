@@ -156,22 +156,11 @@ def scramble_binary(raw_data: bytearray):
     raw_data.extend(os.urandom(random.randint(128, 512)))
     return bytes(raw_data)
 
-async def get_target_info(target_id):
-    async with aiohttp.ClientSession() as session:
-        for url, key in [(f"groups.roblox.com/v1/groups/{target_id}", "groupId"), (f"users.roblox.com/v1/users/{target_id}", "userId")]:
-            try:
-                async with session.get(f"https://{url}") as r:
-                    if r.status == 200:
-                        return key
-            except: continue
-    return "userId"
-
 # --- MASSER FAST PIPELINE SYNCHRONOUS WORKER ---
 def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
     try:
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
         
-        # Audio transformation Engine Loops
         warp = random.uniform(0.99, 1.01)
         audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
         audio = audio.set_frame_rate(44100)
@@ -198,9 +187,11 @@ def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
         return None
 
 # --- MASSER API BURST UPLOADER LOOP ---
-async def upload_burst(session, data, name, api_key, target_id, creator_key):
+async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, status_tracker):
     url = "https://apis.roblox.com/assets/v1/assets"
-    for attempt in range(100): # Max retries fallback limitation chain
+    current_delay = 1.0
+    
+    for attempt in range(1, 51):  # Max retries fallback limitation chain
         form = aiohttp.FormData(quote_fields=False)
         form.add_field('request', json.dumps({
             "assetType": "Audio", "displayName": name, "description": "zepti_W",
@@ -209,8 +200,9 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key):
         form.add_field('fileContent', data, filename=f'{os.urandom(4).hex()}.mp3', content_type='audio/mpeg')
 
         try:
-            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=60) as r:
+            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=30) as r:
                 resp_text = await r.text()
+                
                 if r.status in [200, 201, 202]:
                     try:
                         resp_json = json.loads(resp_text)
@@ -224,20 +216,39 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key):
                                         op_json = json.loads(await op_r.text())
                                         if op_json.get("done") is True:
                                             if "error" in op_json:
-                                                return f"❌ Failed: {op_json['error'].get('message')}"
-                                            return f"✅ Success: {name}"
-                            return f"✅ Success (No Polling Sync): {name}"
-                        return f"✅ Success: {name}"
+                                                status_tracker[idx] = f"FAILED: {op_json['error'].get('message')}"
+                                                return False
+                                            asset_id = op_json.get("response", {}).get("assetId", "Unknown ID")
+                                            status_tracker[idx] = f"SUCCESS (AssetID: {asset_id})"
+                                            return True
+                            status_tracker[idx] = "SUCCESS (No Polling Sync)"
+                            return True
+                        
+                        asset_id = resp_json.get("assetId", "Unknown ID")
+                        status_tracker[idx] = f"SUCCESS (AssetID: {asset_id})"
+                        return True
                     except:
-                        return f"✅ Success: {name}"
+                        status_tracker[idx] = "SUCCESS"
+                        return True
+                        
                 elif r.status == 429:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(current_delay)
+                    current_delay = min(current_delay * 1.5, 15.0)
                 else:
-                    return f"❌ Failed: HTTP {r.status}"
+                    try:
+                        err_msg = json.loads(resp_text).get("message", resp_text)
+                    except:
+                        err_msg = resp_text
+                    status_tracker[idx] = f"FAILED [Status {r.status}]: {err_msg}"
+                    
+                    if r.status in [401, 403, 400]:
+                        return False
         except Exception as e:
-            pass
-        await asyncio.sleep(0.5)
-    return f"❌ Failed: Max retries connection dropped"
+            status_tracker[idx] = f"CONNECTION ERROR: {e}"
+            await asyncio.sleep(1)
+            
+    status_tracker[idx] = "FAILED: Retries Exhausted"
+    return False
 
 # --- BOT COMMANDS ---
 
@@ -332,7 +343,7 @@ async def massupload(
     for idx, data in enumerate(prepared_payload_data, 1):
         if data is not None:
             d_name = get_preset_title(style, idx, title)
-            payloads.append((d_name, data))
+            payloads.append((d_name, data, idx))
             
     if not payloads:
         await status_msg.edit(content=f"{E_FAILED} Audio variations engine transformation loops broken down.")
@@ -341,20 +352,34 @@ async def massupload(
     await status_msg.edit(content=f"{E_LDING} Render Complete. Injecting bursts via Open Cloud endpoints concurrently...")
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    connector = aiohttp.TCPConnector(limit=0, force_close=False)
+    status_tracker = {idx: "PENDING/ABORTED" for _, _, idx in payloads}
+    connector = aiohttp.TCPConnector(limit=5, force_close=False)
     
     # 2. Async ClientSession Burst Mass Upload Dispatch Logic
     async with aiohttp.ClientSession(connector=connector) as session:
         upload_tasks = [
-            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key)
-            for d_name, data in payloads
+            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_tracker)
+            for d_name, data, idx in payloads
         ]
-        final_results = await asyncio.gather(*upload_tasks)
+        results = await asyncio.gather(*upload_tasks)
         
-    await status_msg.edit(content=f"{E_SUCCESS} Massive Open Cloud Burst session finished.")
+    success_count = sum(1 for r in results if r is True)
     
-    formatted_results = "\n".join(final_results)
-    await interaction.channel.send(f"```\n{formatted_results}\n```")
+    # --- STATUS REPORT DASHBOARD ---
+    report = ["="*50, "       ZEPTI V77 MASSUPLOAD PIPELINE REPORT", "="*50]
+    for idx in sorted(status_tracker.keys()):
+        report.append(f" Variant #{idx:02d}: {status_tracker[idx]}")
+    report.append("="*50)
+    report.append(f" Success Ratio:  {success_count} / {len(status_tracker)}")
+    report.append("="*50)
+    report_text = "\n".join(report)
+        
+    if success_count > 0:
+        await status_msg.edit(content=f"{E_SUCCESS} Massive Open Cloud Burst session finished successfully.")
+    else:
+        await status_msg.edit(content=f"{E_FAILED} All payload pipelines dropped or were rejected by Roblox endpoints.")
+        
+    await interaction.channel.send(f"```text\n{report_text}\n```")
 
 @bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
 @app_commands.describe(audio_file="The source sound asset to process")
@@ -465,7 +490,6 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
             
             try:
                 if self.values[0] == "13":
-                    # Instant pass shortcut definition line bypass execution bypassing pedalboard
                     def bypass_proc():
                         cmd = ['ffmpeg', '-y', '-i', ip, '-af', 'volume=35dB,alimiter=level_in=1:level_out=0.99:limit=-0.1dB:attack=5:release=50:aperiodic=1', op]
                         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -621,32 +645,6 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
         await status_msg.edit(content=f"{E_FAILED} Processing failed: {str(e)}")
         
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
-
-@bot.tree.command(name="decalgen", description="Resizes an image to 1080x1080 canvas format and applies watermarks")
-@app_commands.describe(image="Target graphic file or animated GIF asset", watermark="Optional overlay watermark image layout")
-async def decalgen(interaction: discord.Interaction, image: discord.Attachment, watermark: Optional[discord.Attachment] = None):
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
-        
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
-    img_d = await image.read(); wm_d = await watermark.read() if watermark else None
-    def proc():
-        base = Image.open(BytesIO(img_d)); out = BytesIO(); wm = Image.open(BytesIO(wm_d)).convert('RGBA') if wm_d else None
-        def apply(f):
-            if not wm: return f
-            f = f.convert('RGBA').resize((1080,1080), Image.Resampling.LANCZOS)
-            s = wm.resize((int(wm.width*(490/wm.width)), int(wm.height*(490/wm.width))), Image.Resampling.LANCZOS)
-            f.paste(s, (1080-s.width-10, 1080-s.height-10), s); return f
-        if getattr(base, "is_animated", False):
-            fs = [apply(fr).convert('P', palette=Image.Palette.ADAPTIVE) for fr in ImageSequence.Iterator(base)]
-            fs[0].save(out, format='GIF', save_all=True, append_images=fs[1:], loop=0, optimize=True); return out, f"{get_uid()}.gif"
-        res = apply(base); res.save(out, format='PNG', optimize=True); return out, f"{get_uid()}.png"
-    buf, name = await asyncio.get_event_loop().run_in_executor(None, proc); buf.seek(0)
-    
-    await status_msg.edit(content=f"{E_SUCCESS} Asset rendered successfully.")
-    await interaction.followup.send(file=discord.File(buf, filename=name))
 
 if __name__ == "__main__":
     keep_alive()
