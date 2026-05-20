@@ -223,7 +223,6 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
     raw = await audio_file.read()
     stut = random.randint(50, 200)
     
-    # Pre-calculate audio mutations to prevent slamming small CPU allocations
     payloads = []
     for idx in range(1, 11):
         d_name = get_preset_title(style, idx, title)
@@ -261,11 +260,10 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
                             operation_id = resp_json.get("path") or resp_json.get("operationId")
                             
                             if operation_id:
-                                # Poll the operation path to check if it actually passed moderation/creation
                                 op_url = f"https://apis.roblox.com/assets/v1/{operation_id}" if not operation_id.startswith("http") else operation_id
                                 checked_ok = False
                                 
-                                for _ in range(6): # Poll 6 times (up to 12 seconds)
+                                for _ in range(6): 
                                     await asyncio.sleep(2)
                                     async with bot.session.get(op_url, headers=h) as op_r:
                                         op_text = await op_r.text()
@@ -283,7 +281,6 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
                                     success = True
                                     break
                             else:
-                                # Fallback if operation response formatting changes
                                 res.append(f"{E_SUCCESS} | {d_name}")
                                 success = True
                                 break
@@ -380,8 +377,16 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
-                'quiet': True
+                'quiet': True,
+                'no_warnings': True
             }
+            
+            # --- COOKIE INJECTION PATCH ---
+            # Looks for cookies.txt directly alongside the script
+            cookie_file = os.path.join(BASE_DIR, "cookies.txt")
+            if os.path.exists(cookie_file):
+                ydl_opts['cookiefile'] = cookie_file
+                
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
                 
@@ -392,7 +397,7 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
             await interaction.followup.send(file=discord.File(final_filename))
             os.remove(final_filename)
         else:
-            await status_msg.edit(content=f"{E_FAILED} Conversion finished but output file could not be found.")
+            await status_msg.edit(content=f"{E_FAILED} Sign-in check failed. Please double-check your uploaded 'cookies.txt' layout configurations.")
             
     except Exception as e: 
         await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
