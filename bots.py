@@ -14,6 +14,7 @@ from io import BytesIO
 from typing import Literal, Optional
 from flask import Flask
 from threading import Thread
+from concurrent.futures import ThreadPoolExecutor
 
 # --- AUTO-INSTALL YT-DLP IF MISSING ---
 try:
@@ -50,7 +51,7 @@ SEARCH_DIRS = [
 ]
 
 AUTH_DATA = {} 
-EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉")
+EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲😴🤤😪😵🤐🤢🤮🤧😷🤒🤕🤑🤠😈👿👹👺🤡💩👻💀☠️👽👾🤖🎃😺😸😹😻😼😽🙀😿😾🤲👐🙌👏👏🤝👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍💄💋👄👅👂👃👣👁👀🧠🗣👤👥👶👧🧒👦👩🧑👨👱‍♀️👱‍♂️🧔👵🧓👴👲👳‍♀️👳‍♂️🧕👮‍♀️👮‍♂️👷‍♀️👷‍♂️💂‍♀️💂‍♂️🕵️‍♀️🕵️‍♂️👩‍⚕️👨‍⚕️👩‍🌾👨‍🌾👩‍🍳👨‍🍳👩‍🎓👨‍🎓👩‍🎤👨‍🎤👩‍🏫👨‍🏫👩‍🏭👨‍🏭👩‍💻👨‍💻👩‍💼👨‍💼👩‍🔧👨‍🔧👩‍🔬👨‍🔬👩‍🎨👨‍🎨👩‍🚒👨‍🚒👩‍✈️👨‍✈️👩‍🚀👨‍🚀👩‍⚖️👨‍⚖️👰🤵👸🤴🤶🎅🧙‍♀️🧙‍♂️🧝‍♀️🧝‍♂️🧛‍♀️🧛‍♂️🧟‍♀️🧟‍♂️🧞‍♀️🧞‍♂️🧜‍♀️🧜‍♂️🧚‍♀️🧚‍♂️👼🤰🤱🙇‍♀️🙇‍♂️💁‍♀️💁‍♂️🙅‍♀️🙅‍♂️🙆‍♀️🙆‍♂️🙋‍♀️🙋‍♂️🤦‍♀️🤦‍♂️🤷‍♀️🤷‍♂️🙎‍♀️🙎‍♂️🙍‍♀️🙍‍♂️💇‍♀️💇‍♂️💆‍♀️💆‍♂️🧖‍♀️🧖‍♂️💅🤳💃🕺👯‍♀️👯‍♂️🕴🚶‍♀️🚶‍♂️RUN")
 
 # Fixed Application Emoji Formatting
 E_MOD = "<a:mod:1506265969562226738>"
@@ -58,7 +59,7 @@ E_LDING = "<a:lding:1506265760631099452>"
 E_SUCCESS = "<a:success:1506265759452631082>"
 E_FAILED = "<a:failed:1506265787900579994>"
 
-# Dynamic Whitelist initialized with the two core administrator IDs
+# Dynamic Whitelist & Administrators
 ALLOWED_EMOJI_USERS = {1317324380291862659, 1495521117115256962}
 ADMIN_IDS = {1317324380291862659, 1495521117115256962}
 
@@ -125,13 +126,27 @@ def get_loud_preset(pid):
     }
     return presets.get(str(pid), presets["1"])
 
+# --- MASSER INTEGRATED AUDIO TITLE CONFIGURATION ---
 def get_preset_title(style, index, custom_name):
-    if style == "Chaos (Symbols/Letters)": return "".join(random.choice(string.ascii_letters + string.digits + string.punctuation) for _ in range(20))
-    if style == "Emoji Heavy": return "".join(random.choice(EMOJI_POOL) for _ in range(15))
-    if style == "Uppercase & Lowercase": return "".join(random.choice(string.ascii_letters) for _ in range(20))
-    if style == "Numbers Only": return "".join(random.choice(string.digits) for _ in range(15))
-    if style == "No Suffix (Clean)": return custom_name
-    return f"{custom_name}_{index}"
+    letters = string.ascii_letters
+    nums = string.digits
+    syms = string.punctuation
+    
+    if style == "Chaos (Symbols/Letters)": 
+        chars = letters + nums + syms
+        return "".join(random.choice(chars) for _ in range(20))
+    if style == "Emoji Heavy": 
+        return "".join(random.choice(EMOJI_POOL) for _ in range(20))
+    if style == "Uppercase & Lowercase": 
+        return "".join(random.choice(letters) for _ in range(20))
+    if style == "Numbers Only": 
+        return "".join(random.choice(nums) for _ in range(15))
+    if style == "No Suffix (Clean)": 
+        return custom_name
+    if style.startswith("withoutnumber-"):
+        return style.replace("withoutnumber-", "")
+        
+    return f"{custom_name}{index}"
 
 def scramble_binary(raw_data: bytearray):
     if len(raw_data) > 2000:
@@ -141,16 +156,88 @@ def scramble_binary(raw_data: bytearray):
     raw_data.extend(os.urandom(random.randint(128, 512)))
     return bytes(raw_data)
 
-def process_audio_bypass(audio_bytes, index, stutter_ms):
-    audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
-    stutter = audio[:stutter_ms] * index
-    audio = stutter + audio
-    audio = audio.set_frame_rate(int(audio.frame_rate + random.uniform(-3, 3)))
-    buf = io.BytesIO()
-    audio.export(buf, format="mp3", bitrate="192k", tags={'comment': os.urandom(8).hex()})
-    final = scramble_binary(bytearray(buf.getvalue()))
-    del audio; gc.collect()
-    return final
+async def get_target_info(target_id):
+    async with aiohttp.ClientSession() as session:
+        for url, key in [(f"groups.roblox.com/v1/groups/{target_id}", "groupId"), (f"users.roblox.com/v1/users/{target_id}", "userId")]:
+            try:
+                async with session.get(f"https://{url}") as r:
+                    if r.status == 200:
+                        return key
+            except: continue
+    return "userId"
+
+# --- MASSER FAST PIPELINE SYNCHRONOUS WORKER ---
+def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
+    try:
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        
+        # Audio transformation Engine Loops
+        warp = random.uniform(0.99, 1.01)
+        audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
+        audio = audio.set_frame_rate(44100)
+
+        jitter_val = random.uniform(-5, 5)
+        audio = audio.set_frame_rate(int(audio.frame_rate + jitter_val))
+        
+        stutter = audio[:batch_stutter_ms] * i 
+        audio = stutter + audio
+
+        buf = io.BytesIO()
+        audio.export(buf, format="mp3", bitrate="192k", tags={'comment': os.urandom(8).hex()})
+        raw_data = bytearray(buf.getvalue())
+        
+        if scramble_enabled:
+            raw_data = bytearray(scramble_binary(raw_data))
+            
+        final_val = bytes(raw_data)
+        del audio, raw_data, buf
+        gc.collect()
+        return final_val
+    except Exception as e:
+        print(f"[Processing Error] Sync worker variant task {i} failed: {e}")
+        return None
+
+# --- MASSER API BURST UPLOADER LOOP ---
+async def upload_burst(session, data, name, api_key, target_id, creator_key):
+    url = "https://apis.roblox.com/assets/v1/assets"
+    for attempt in range(100): # Max retries fallback limitation chain
+        form = aiohttp.FormData(quote_fields=False)
+        form.add_field('request', json.dumps({
+            "assetType": "Audio", "displayName": name, "description": "zepti_W",
+            "creationContext": {"creator": {creator_key: str(target_id)}}
+        }), content_type='application/json')
+        form.add_field('fileContent', data, filename=f'{os.urandom(4).hex()}.mp3', content_type='audio/mpeg')
+
+        try:
+            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=60) as r:
+                resp_text = await r.text()
+                if r.status in [200, 201, 202]:
+                    try:
+                        resp_json = json.loads(resp_text)
+                        operation_id = resp_json.get("path") or resp_json.get("operationId")
+                        if operation_id:
+                            op_url = f"https://apis.roblox.com/assets/v1/{operation_id}" if not operation_id.startswith("http") else operation_id
+                            for _ in range(6):
+                                await asyncio.sleep(2)
+                                async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
+                                    if op_r.status == 200:
+                                        op_json = json.loads(await op_r.text())
+                                        if op_json.get("done") is True:
+                                            if "error" in op_json:
+                                                return f"❌ Failed: {op_json['error'].get('message')}"
+                                            return f"✅ Success: {name}"
+                            return f"✅ Success (No Polling Sync): {name}"
+                        return f"✅ Success: {name}"
+                    except:
+                        return f"✅ Success: {name}"
+                elif r.status == 429:
+                    await asyncio.sleep(5)
+                else:
+                    return f"❌ Failed: HTTP {r.status}"
+        except Exception as e:
+            pass
+        await asyncio.sleep(0.5)
+    return f"❌ Failed: Max retries connection dropped"
 
 # --- BOT COMMANDS ---
 
@@ -207,9 +294,16 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
-@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track to Roblox Cloud")
-@app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern")
-async def massupload(interaction: discord.Interaction, audio_file: discord.Attachment, title: str, style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"):
+# --- REFACTORED HIGH-SPEED PARALLEL ROBLOX UPLOADER ---
+@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track concurrently to Roblox Cloud")
+@app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern", scramble="Enable asset binary signature scrambling loop")
+async def massupload(
+    interaction: discord.Interaction, 
+    audio_file: discord.Attachment, 
+    title: str, 
+    style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default",
+    scramble: bool = True
+):
     if interaction.user.id not in AUTH_DATA: 
         return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
     
@@ -218,94 +312,48 @@ async def massupload(interaction: discord.Interaction, audio_file: discord.Attac
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing audio variation permutations sequentially...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Spinning up parallel bypass execution pipelines...")
     acc = AUTH_DATA[interaction.user.id]
-    raw = await audio_file.read()
-    stut = random.randint(50, 200)
+    raw_audio_bytes = await audio_file.read()
+    batch_stutter_ms = random.randint(40, 250)
     
+    loop = asyncio.get_running_loop()
+    
+    # 1. ThreadPool Concurrent Audio Transformation Variations Execution
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        process_tasks = [
+            loop.run_in_executor(pool, core_process_worker, raw_audio_bytes, idx, batch_stutter_ms, scramble) 
+            for idx in range(1, 11)
+        ]
+        prepared_payload_data = await asyncio.gather(*process_tasks)
+    
+    # Pack rendered bytes and build custom tracking variations lists
     payloads = []
-    for idx in range(1, 11):
-        d_name = get_preset_title(style, idx, title)
-        data = await asyncio.get_event_loop().run_in_executor(None, process_audio_bypass, raw, idx, stut)
-        payloads.append((d_name, data))
+    for idx, data in enumerate(prepared_payload_data, 1):
+        if data is not None:
+            d_name = get_preset_title(style, idx, title)
+            payloads.append((d_name, data))
+            
+    if not payloads:
+        await status_msg.edit(content=f"{E_FAILED} Audio variations engine transformation loops broken down.")
+        return
+
+    await status_msg.edit(content=f"{E_LDING} Render Complete. Injecting bursts via Open Cloud endpoints concurrently...")
+
+    creator_key = "groupId" if acc["isGroup"] else "userId"
+    connector = aiohttp.TCPConnector(limit=0, force_close=False)
     
-    await status_msg.edit(content=f"{E_LDING} Processing calculations done. Initiating sequential Cloud pipeline...")
-    
-    res = []
-    h = {"x-api-key": acc["apikey"]}
-    ckey = "groupId" if acc["isGroup"] else "userId"
-    
-    for d_name, data in payloads:
-        success = False
-        error_reason = "Unknown Error"
+    # 2. Async ClientSession Burst Mass Upload Dispatch Logic
+    async with aiohttp.ClientSession(connector=connector) as session:
+        upload_tasks = [
+            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key)
+            for d_name, data in payloads
+        ]
+        final_results = await asyncio.gather(*upload_tasks)
         
-        for attempt in range(1, 4):
-            f = aiohttp.FormData()
-            p = {
-                "assetType": "Audio", 
-                "displayName": d_name, 
-                "description": "zepti_W", 
-                "creationContext": {"creator": {ckey: acc["targetId"]}}
-            }
-            f.add_field('request', json.dumps(p), content_type='application/json')
-            f.add_field('fileContent', data, filename=f'{get_uid(4)}.mp3', content_type='audio/mpeg')
-            
-            try:
-                async with bot.session.post("https://apis.roblox.com/assets/v1/assets", data=f, headers=h) as r:
-                    resp_text = await r.text()
-                    
-                    if r.status in [200, 201, 202]:
-                        try:
-                            resp_json = json.loads(resp_text)
-                            operation_id = resp_json.get("path") or resp_json.get("operationId")
-                            
-                            if operation_id:
-                                op_url = f"https://apis.roblox.com/assets/v1/{operation_id}" if not operation_id.startswith("http") else operation_id
-                                checked_ok = False
-                                
-                                for _ in range(6): 
-                                    await asyncio.sleep(2)
-                                    async with bot.session.get(op_url, headers=h) as op_r:
-                                        op_text = await op_r.text()
-                                        if op_r.status == 200:
-                                            op_json = json.loads(op_text)
-                                            if op_json.get("done") is True:
-                                                if "error" in op_json:
-                                                    error_reason = f"Cloud Error: {op_json['error'].get('message')}"
-                                                else:
-                                                    checked_ok = True
-                                                break
-                                                
-                                if checked_ok:
-                                    res.append(f"{E_SUCCESS} | {d_name}")
-                                    success = True
-                                    break
-                            else:
-                                res.append(f"{E_SUCCESS} | {d_name}")
-                                success = True
-                                break
-                        except Exception as parse_err:
-                            print(f"[Parse Debug Warning]: {parse_err}")
-                            res.append(f"{E_SUCCESS} | {d_name}")
-                            success = True
-                            break
-                            
-                    elif r.status == 429:
-                        error_reason = "Rate Limited (429)"
-                        await asyncio.sleep(4 * attempt)
-                    else:
-                        error_reason = f"HTTP {r.status} - {resp_text}"
-                        print(f"[Console Diagnostics Log] {d_name} Failed -> Status {r.status}: {resp_text}")
-                        break
-            except Exception as e:
-                error_reason = f"Network Exception: {str(e)}"
-                await asyncio.sleep(2)
-                
-        if not success:
-            res.append(f"{E_FAILED} | {d_name} ({error_reason})")
-            
-    await status_msg.edit(content=f"{E_SUCCESS} Pipeline complete.")
-    formatted_results = "\n".join([r.replace(E_SUCCESS, "✅").replace(E_FAILED, "❌") for r in res])
+    await status_msg.edit(content=f"{E_SUCCESS} Massive Open Cloud Burst session finished.")
+    
+    formatted_results = "\n".join(final_results)
     await interaction.channel.send(f"```\n{formatted_results}\n```")
 
 @bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
@@ -381,8 +429,6 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                 'no_warnings': True
             }
             
-            # --- COOKIE INJECTION PATCH ---
-            # Looks for cookies.txt directly alongside the script
             cookie_file = os.path.join(BASE_DIR, "cookies.txt")
             if os.path.exists(cookie_file):
                 ydl_opts['cookiefile'] = cookie_file
@@ -418,12 +464,19 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
             await audio_file.save(ip)
             
             try:
-                def proc():
-                    with AudioFile(ip) as af: rs = get_loud_preset(self.values[0])(af.read(af.frames), af.samplerate)
-                    tw = f"lt_{u}.wav"
-                    with AudioFile(tw, 'w', af.samplerate, rs.shape[0]) as o: o.write(rs)
-                    AudioSegment.from_file(tw).export(op, format="ogg"); os.remove(tw)
-                await asyncio.get_event_loop().run_in_executor(None, proc)
+                if self.values[0] == "13":
+                    # Instant pass shortcut definition line bypass execution bypassing pedalboard
+                    def bypass_proc():
+                        cmd = ['ffmpeg', '-y', '-i', ip, '-af', 'volume=35dB,alimiter=level_in=1:level_out=0.99:limit=-0.1dB:attack=5:release=50:aperiodic=1', op]
+                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    await asyncio.get_event_loop().run_in_executor(None, bypass_proc)
+                else:
+                    def proc():
+                        with AudioFile(ip) as af: rs = get_loud_preset(self.values[0])(af.read(af.frames), af.samplerate)
+                        tw = f"lt_{u}.wav"
+                        with AudioFile(tw, 'w', af.samplerate, rs.shape[0]) as o: o.write(rs)
+                        AudioSegment.from_file(tw).export(op, format="ogg"); os.remove(tw)
+                    await asyncio.get_event_loop().run_in_executor(None, proc)
                 
                 if os.path.exists(op):
                     await progress_msg.edit(content=f"{E_MOD} **Loud Preset {self.values[0]} Processed**")
