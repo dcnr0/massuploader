@@ -187,7 +187,7 @@ def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
         return None
 
 # --- MASSER API BURST UPLOADER LOOP ---
-async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, status_tracker):
+async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
     current_delay = 1.0
     
@@ -216,19 +216,17 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
                                         op_json = json.loads(await op_r.text())
                                         if op_json.get("done") is True:
                                             if "error" in op_json:
-                                                status_tracker[idx] = f"FAILED: {op_json['error'].get('message')}"
+                                                await live_status_callback(success=False, name=name, detail=op_json['error'].get('message'))
                                                 return False
-                                            asset_id = op_json.get("response", {}).get("assetId", "Unknown ID")
-                                            status_tracker[idx] = f"SUCCESS (AssetID: {asset_id})"
+                                            await live_status_callback(success=True, name=name)
                                             return True
-                            status_tracker[idx] = "SUCCESS (No Polling Sync)"
+                            await live_status_callback(success=True, name=name, detail="No Polling Sync")
                             return True
                         
-                        asset_id = resp_json.get("assetId", "Unknown ID")
-                        status_tracker[idx] = f"SUCCESS (AssetID: {asset_id})"
+                        await live_status_callback(success=True, name=name)
                         return True
                     except:
-                        status_tracker[idx] = "SUCCESS"
+                        await live_status_callback(success=True, name=name)
                         return True
                         
                 elif r.status == 429:
@@ -239,15 +237,13 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
                         err_msg = json.loads(resp_text).get("message", resp_text)
                     except:
                         err_msg = resp_text
-                    status_tracker[idx] = f"FAILED [Status {r.status}]: {err_msg}"
-                    
+                    await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}")
                     if r.status in [401, 403, 400]:
                         return False
         except Exception as e:
-            status_tracker[idx] = f"CONNECTION ERROR: {e}"
             await asyncio.sleep(1)
             
-    status_tracker[idx] = "FAILED: Retries Exhausted"
+    await live_status_callback(success=False, name=name, detail="Retries Exhausted")
     return False
 
 # --- BOT COMMANDS ---
@@ -323,7 +319,8 @@ async def massupload(
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Spinning up parallel bypass execution pipelines...")
+    # Set custom processing message text
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Massuploading...")
     acc = AUTH_DATA[interaction.user.id]
     raw_audio_bytes = await audio_file.read()
     batch_stutter_ms = random.randint(40, 250)
@@ -349,37 +346,55 @@ async def massupload(
         await status_msg.edit(content=f"{E_FAILED} Audio variations engine transformation loops broken down.")
         return
 
-    await status_msg.edit(content=f"{E_LDING} Render Complete. Injecting bursts via Open Cloud endpoints concurrently...")
-
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    status_tracker = {idx: "PENDING/ABORTED" for _, _, idx in payloads}
     connector = aiohttp.TCPConnector(limit=5, force_close=False)
     
+    # --- LIVE REPORT CONTEXT VARIABLES ---
+    total_payloads = len(payloads)
+    processed_count = 0
+    success_count = 0
+    status_lines = []
+    lock = asyncio.Lock()
+    
+    # Live status callback helper
+    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None):
+        nonlocal processed_count, success_count
+        async with lock:
+            processed_count += 1
+            if success:
+                success_count += 1
+                emoji = "<a:success:1506265759452631082>"
+                line = f"{emoji} Success! {success_count}/{total_payloads} uploaded! [{name}]"
+            else:
+                emoji = "<a:failed:1506265787900579994>"
+                err_suffix = f" ({detail})" if detail else ""
+                line = f"{emoji} Failed! {processed_count - success_count}/{total_payloads} dropped! [{name}]{err_suffix}"
+                
+            status_lines.append(line)
+            
+            # Construct real-time message text string output layout
+            current_dashboard = (
+                f"**Burst Upload Progression:** ({processed_count}/{total_payloads})\n"
+                + "\n".join(status_lines)
+            )
+            try:
+                await status_msg.edit(content=current_dashboard)
+            except Exception:
+                pass # Safeguard against Discord API frame editing bottlenecks
+
     # 2. Async ClientSession Burst Mass Upload Dispatch Logic
     async with aiohttp.ClientSession(connector=connector) as session:
         upload_tasks = [
-            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_tracker)
+            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_update_worker)
             for d_name, data, idx in payloads
         ]
-        results = await asyncio.gather(*upload_tasks)
+        await asyncio.gather(*upload_tasks)
         
-    success_count = sum(1 for r in results if r is True)
-    
-    # --- STATUS REPORT DASHBOARD ---
-    report = ["="*50, "       ZEPTI V77 MASSUPLOAD PIPELINE REPORT", "="*50]
-    for idx in sorted(status_tracker.keys()):
-        report.append(f" Variant #{idx:02d}: {status_tracker[idx]}")
-    report.append("="*50)
-    report.append(f" Success Ratio:  {success_count} / {len(status_tracker)}")
-    report.append("="*50)
-    report_text = "\n".join(report)
-        
+    # Final Output Summary Statement Adjustments
     if success_count > 0:
-        await status_msg.edit(content=f"{E_SUCCESS} Massive Open Cloud Burst session finished successfully.")
+        await interaction.channel.send(f"✅ Open Cloud Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
     else:
-        await status_msg.edit(content=f"{E_FAILED} All payload pipelines dropped or were rejected by Roblox endpoints.")
-        
-    await interaction.channel.send(f"```text\n{report_text}\n```")
+        await interaction.channel.send(f"❌ Batch Session terminated. All execution processes dropped or rejected.")
 
 @bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
 @app_commands.describe(audio_file="The source sound asset to process")
