@@ -50,8 +50,14 @@ SEARCH_DIRS = [
     os.path.join(d, "assets") if os.path.isdir(os.path.join(BASE_DIR, "assets")) else BASE_DIR for d in [BASE_DIR]
 ]
 
+# --- CRITICAL FFMPEG FIX FOR PYDUB ---
+FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg")
+if os.name == 'nt' and not FFMPEG_BIN.endswith('.exe'): 
+    FFMPEG_BIN += '.exe'
+AudioSegment.converter = FFMPEG_BIN
+
 AUTH_DATA = {} 
-EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲😴🤤😪😵🤐🤢🤮🤧😷🤒🤕🤑🤠😈👿👹👺🤡💩👻💀☠️👽👾🤖🎃😺😸😹😻😼😽🙀😿😾🤲👐🙌👏👏🤝👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍💄💋👄👅👂👃👣👁👀🧠🗣👤👥👶👧🧒👦👩🧑👨👱‍♀️👱‍♂️🧔👵🧓👴👲👳‍♀️👳‍♂️🧕👮‍♀️👮‍♂️👷‍♀️👷‍♂️💂‍♀️💂‍♂️🕵️‍♀️🕵️‍♂️👩‍⚕️👨‍⚕️👩‍🌾👨‍🌾👩‍🍳👨‍🍳👩‍🎓👨‍🎓👩‍🎤👨‍🎤👩‍🏫👨‍🏫👩‍🏭👨‍🏭👩‍💻👨‍💻👩‍💼👨‍💼👩‍🔧👨‍🔧👩‍🔬👨‍🔬👩‍🎨👨‍🎨👩‍Camp👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍")
+EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲⚠️⚡🔥")
 
 # Fixed Application Emoji Formatting
 E_MOD = "<a:mod:1506265969562226738>"
@@ -155,9 +161,11 @@ def scramble_binary(raw_data: bytearray):
     raw_data.extend(os.urandom(random.randint(128, 512)))
     return bytes(raw_data)
 
-def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
+# --- FIXED HIGH PERFORMANCE COOLDOWN WORKER ---
+def core_process_worker(base_segment, i, batch_stutter_ms, scramble_enabled):
     try:
-        audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
+        # Safe duplicate clone initialization from pre-loaded main thread asset
+        audio = base_segment + 0
         warp = random.uniform(0.99, 1.01)
         audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
         audio = audio.set_frame_rate(44100)
@@ -183,12 +191,12 @@ def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
         print(f"[Processing Error] Task {i} failed: {e}")
         return None
 
-# --- HIGH SPEED ULTRA OUTBOUND UPLOADER (NO POLLING BLOCKING) ---
+# --- FIRE AND FORGET OUTBOUND UPLOADER LOOP ---
 async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
-    current_delay = 0.5  # Reduced initial delay for faster retries
+    current_delay = 0.5
     
-    for attempt in range(1, 20):  # Cap retries to prevent long lockups
+    for attempt in range(1, 20):
         form = aiohttp.FormData(quote_fields=False)
         form.add_field('request', json.dumps({
             "assetType": "Audio", "displayName": name, "description": "zepti_W",
@@ -199,12 +207,9 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
         try:
             async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
                 resp_text = await r.text()
-                
-                # Instantly accept 200 OK, 201 Created, or 202 Accepted and report to interface
                 if r.status in [200, 201, 202]:
                     await live_status_callback(success=True, name=name)
                     return True
-                        
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
                     current_delay = min(current_delay * 1.5, 5.0)
@@ -216,7 +221,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
                     await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}")
                     if r.status in [401, 403, 400]:
                         return False
-        except Exception as e:
+        except Exception:
             await asyncio.sleep(0.5)
             
     await live_status_callback(success=False, name=name, detail="Retries Exhausted")
@@ -224,61 +229,49 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
 
 # --- BOT COMMANDS ---
 
-@bot.tree.command(name="emojiwhitelist", description="Manages the active permission whitelist configuration list for the emoji command")
-@app_commands.describe(action="Whether to add or remove access to the whitelist pool", user="The target discord user profile")
+@bot.tree.command(name="emojiwhitelist", description="Manages permission whitelist for the emoji command")
+@app_commands.describe(action="Action to perform", user="The target discord user")
 async def emoji_whitelist_manager(interaction: discord.Interaction, action: Literal["add", "remove"], user: discord.User):
     if interaction.user.id not in ADMIN_IDS:
-        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to modify the configuration.", ephemeral=True)
-    
+        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized.", ephemeral=True)
     await interaction.response.defer(ephemeral=True)
-    
     if action == "add":
         ALLOWED_EMOJI_USERS.add(user.id)
-        await interaction.followup.send(content=f"{E_SUCCESS} Granted permission pool access: **{user.name}** (`{user.id}`) can now use /emoji.", ephemeral=True)
+        await interaction.followup.send(content=f"{E_SUCCESS} Added **{user.name}**.", ephemeral=True)
     elif action == "remove":
         if user.id in ADMIN_IDS:
-            return await interaction.followup.send(content=f"{E_FAILED} Safeguard Override: Primary administrator IDs cannot be removed from the configuration list.", ephemeral=True)
-        
+            return await interaction.followup.send(content=f"{E_FAILED} Cannot remove Admin.", ephemeral=True)
         ALLOWED_EMOJI_USERS.discard(user.id)
-        await interaction.followup.send(content=f"{E_SUCCESS} Revoked permission pool access: **{user.name}** (`{user.id}`) can no longer use /emoji.", ephemeral=True)
+        await interaction.followup.send(content=f"{E_SUCCESS} Removed **{user.name}**.", ephemeral=True)
 
-@bot.tree.command(name="emoji", description="Uploads an image or GIF directly to the server's custom emoji list")
-@app_commands.describe(name="The shortcode for the emoji (:name:)", file="Image or GIF file to upload (Max 256KB)")
+@bot.tree.command(name="emoji", description="Uploads an image or GIF to server's custom emojis")
+@app_commands.describe(name="Emoji name", file="File to upload (Max 256KB)")
 async def create_server_emoji(interaction: discord.Interaction, name: str, file: discord.Attachment):
     if interaction.user.id not in ALLOWED_EMOJI_USERS:
-        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized: You do not have permission to execute this command.", ephemeral=True)
-
+        return await interaction.response.send_message(content=f"{E_FAILED} Unauthorized.", ephemeral=True)
     if not interaction.guild:
-        return await interaction.response.send_message(content=f"{E_FAILED} This command can only be executed within a server.", ephemeral=True)
-        
-    bot_member = interaction.guild.me
-    if not bot_member.guild_permissions.manage_expressions and not bot_member.guild_permissions.manage_emojis_and_stickers:
-        return await interaction.response.send_message(content=f"{E_FAILED} I do not have the 'Manage Expressions' permission in this server.", ephemeral=True)
-
-    await interaction.response.defer()
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing image payload configurations...")
-
+        return await interaction.response.send_message(content=f"{E_FAILED} Run this in a server.", ephemeral=True)
     if file.size > 256000:
-         return await status_msg.edit(content=f"{E_FAILED} Upload layout rejected. Discord limits expression emojis to 256KB max.")
-
+         return await interaction.response.send_message(content=f"{E_FAILED} File exceeds max 256KB constraint.")
+         
+    await interaction.response.defer()
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing image payload...")
     try:
         img_bytes = await file.read()
-        new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes, reason=f"Created by whitelist user: {interaction.user}")
-        await status_msg.edit(content=f"{E_SUCCESS} Emoji uploaded successfully! Created: {new_emoji}")
-    except discord.HTTPException as err:
-        await status_msg.edit(content=f"{E_FAILED} Server registration dropped: {str(err)}")
+        new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes)
+        await status_msg.edit(content=f"{E_SUCCESS} Emoji uploaded! {new_emoji}")
     except Exception as e:
-        await status_msg.edit(content=f"{E_FAILED} System Exception running configuration: {str(e)}")
+        await status_msg.edit(content=f"{E_FAILED} Error: {str(e)}")
 
-@bot.tree.command(name="api", description="Links your Roblox Open Cloud API Key and target User or Group ID configuration")
-@app_commands.describe(key="Your Roblox Asset API Key", target_id="The User ID or Group ID destination", is_group="Set to True if target ID is a Group")
+@bot.tree.command(name="api", description="Links your Roblox Open Cloud API Key")
+@app_commands.describe(key="Roblox Asset API Key", target_id="User or Group ID destination", is_group="Is group ID")
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
     await interaction.response.defer(ephemeral=True)
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
-    await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
+    await interaction.followup.send(content=f"{E_SUCCESS} Linked to Destination ID: **{target_id}**.", ephemeral=True)
 
-@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track concurrently to Roblox Cloud")
-@app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern", scramble="Enable asset binary signature scrambling loop")
+@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies concurrently to Roblox")
+@app_commands.describe(audio_file="Sound asset to upload", title="Display name prefix", style="Randomizer style pattern", scramble="Enable binary scrambling")
 async def massupload(
     interaction: discord.Interaction, 
     audio_file: discord.Attachment, 
@@ -294,18 +287,26 @@ async def massupload(
     except discord.errors.NotFound:
         return
         
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Massuploading...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Initializing conversions engine...")
     acc = AUTH_DATA[interaction.user.id]
-    raw_audio_bytes = await audio_file.read()
-    batch_stutter_ms = random.randint(40, 250)
     
+    # --- CRITICAL STABILITY FIX: Parse sound file once securely on the main thread loop ---
+    try:
+        raw_audio_bytes = await audio_file.read()
+        base_segment = AudioSegment.from_file(io.BytesIO(raw_audio_bytes))
+    except Exception as e:
+        await status_msg.edit(content=f"{E_FAILED} Pydub failed to decode file source: {e}")
+        return
+
+    batch_stutter_ms = random.randint(40, 250)
     loop = asyncio.get_running_loop()
     
-    # CRITICAL FIX: Limit max workers to 2 or 3. This spaces out the FFmpeg processing 
-    # demands slightly so your host CPU does not lock up and drop the Discord shard.
+    await status_msg.edit(content=f"{E_LDING} Generating audio modifications loop...")
+    
+    # Managed concurrency pool keeps gateway stable
     with ThreadPoolExecutor(max_workers=3) as pool:
         process_tasks = [
-            loop.run_in_executor(pool, core_process_worker, raw_audio_bytes, idx, batch_stutter_ms, scramble) 
+            loop.run_in_executor(pool, core_process_worker, base_segment, idx, batch_stutter_ms, scramble) 
             for idx in range(1, 11)
         ]
         prepared_payload_data = await asyncio.gather(*process_tasks)
@@ -317,7 +318,7 @@ async def massupload(
             payloads.append((d_name, data, idx))
             
     if not payloads:
-        await status_msg.edit(content=f"{E_FAILED} Audio variations engine transformation loops broken down.")
+        await status_msg.edit(content=f"{E_FAILED} Audio variations transformation failed.")
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
@@ -328,8 +329,6 @@ async def massupload(
     success_count = 0
     status_lines = []
     lock = asyncio.Lock()
-    
-    # Track dashboard states to update message via background loop safely
     last_ui_update = 0
     
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None):
@@ -347,10 +346,9 @@ async def massupload(
                 
             status_lines.append(line)
             
-            # CRITICAL FIX: Only edit the Discord Message UI if 1.5 seconds have passed 
-            # OR if it's the absolute final file. Prevents gateway congestion and rate limits.
+            # Rate limit dashboard edits to keep gateway running smoothly
             now = datetime.datetime.now().timestamp()
-            if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
+            if (now - last_ui_update > 1.6) or (processed_count == total_payloads):
                 last_ui_update = now
                 current_dashboard = (
                     f"**Burst Upload Progression:** ({processed_count}/{total_payloads})\n"
@@ -372,14 +370,12 @@ async def massupload(
         await interaction.channel.send(f"✅ Open Cloud Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
     else:
         await interaction.channel.send(f"❌ Batch Session terminated. All execution processes dropped or rejected.")
-        
-@bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
-@app_commands.describe(audio_file="The source sound asset to process")
+
+@bot.tree.command(name="method", description="Processes audio through complex phase loops")
+@app_commands.describe(audio_file="The source sound asset")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer(ephemeral=True)
+    except discord.errors.NotFound: return
 
     class MethodSelect(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
@@ -397,8 +393,7 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                         await progress_msg.edit(content=f"{E_MOD} **8D Audio Activated**")
                         await i.followup.send(file=discord.File(op))
                     else:
-                        await progress_msg.edit(content=f"{E_FAILED} Method failed to generate output.")
-                    
+                        await progress_msg.edit(content=f"{E_FAILED} Method failed.")
                 elif self.values[0] == "copyright":
                     def run_copyright():
                         subprocess.run(['ffmpeg', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -407,24 +402,23 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                         await progress_msg.edit(content=f"{E_MOD} **Copyright Bypass Activated**")
                         await i.followup.send(file=discord.File(op))
                     else:
-                        await progress_msg.edit(content=f"{E_FAILED} Method failed to generate output.")
+                        await progress_msg.edit(content=f"{E_FAILED} Method failed.")
             except Exception:
-                await progress_msg.edit(content=f"{E_FAILED} Error running dropdown filter.")
-                
+                await progress_msg.edit(content=f"{E_FAILED} Error running filter.")
             [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
     v = discord.ui.View()
     v.add_item(MethodSelect(
         placeholder="Choose Bypass Method", 
         options=[
-            discord.SelectOption(label="8D Audio", value="8d", description="8D Phaser Effect Bypass"),
-            discord.SelectOption(label="Copyright Bypass", value="copyright", description="Multi-stage Asetrate/Atempo Shift")
+            discord.SelectOption(label="8D Audio", value="8d"),
+            discord.SelectOption(label="Copyright Bypass", value="copyright")
         ]
     ))
     await interaction.followup.send(content=f"{E_MOD} Select Method:", view=v)
 
-@bot.tree.command(name="mp3", description="Downloads web audio links and extracts them cleanly into an MP3 file")
-@app_commands.describe(url="The web or video streaming url link to extract audio from")
+@bot.tree.command(name="mp3", description="Downloads web audio links cleanly")
+@app_commands.describe(url="Web url link to extract audio from")
 async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
@@ -445,33 +439,25 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                 'quiet': True,
                 'no_warnings': True
             }
-            
             cookie_file = os.path.join(BASE_DIR, "cookies.txt")
-            if os.path.exists(cookie_file):
-                ydl_opts['cookiefile'] = cookie_file
-                
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+            if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
                 
         await asyncio.get_event_loop().run_in_executor(None, dl)
-        
         if os.path.exists(final_filename):
             await status_msg.edit(content=f"{E_SUCCESS} Successfully downloaded!")
             await interaction.followup.send(file=discord.File(final_filename))
             os.remove(final_filename)
         else:
-            await status_msg.edit(content=f"{E_FAILED} Sign-in check failed. Please double-check your uploaded 'cookies.txt' layout configurations.")
-            
+            await status_msg.edit(content=f"{E_FAILED} Build output missing.")
     except Exception as e: 
         await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
-@bot.tree.command(name="loudset", description="Alters audio using specialized aggressive mastering presets")
-@app_commands.describe(audio_file="The source sound asset to master")
+@bot.tree.command(name="loudset", description="Alters audio using mastering presets")
+@app_commands.describe(audio_file="The sound asset to master")
 async def loudset(interaction: discord.Interaction, audio_file: discord.Attachment):
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer(ephemeral=True)
+    except discord.errors.NotFound: return
     
     class P(discord.ui.Select):
         async def callback(self, i):
@@ -483,8 +469,7 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
             try:
                 if self.values[0] == "13":
                     def bypass_proc():
-                        cmd = ['ffmpeg', '-y', '-i', ip, '-af', 'volume=35dB,alimiter=level_in=1:level_out=0.99:limit=-0.1dB:attack=5:release=50:aperiodic=1', op]
-                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.run(['ffmpeg', '-y', '-i', ip, '-af', 'volume=35dB,alimiter=level_in=1:level_out=0.99:limit=-0.1dB:attack=5:release=50:aperiodic=1', op], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await asyncio.get_event_loop().run_in_executor(None, bypass_proc)
                 else:
                     def proc():
@@ -501,19 +486,16 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
                     await progress_msg.edit(content=f"{E_FAILED} File generation failed.")
             except Exception:
                 await progress_msg.edit(content=f"{E_FAILED} Processing failed.")
-                
             [os.remove(f) for f in [ip, op] if os.path.exists(f)]
             
     v = discord.ui.View(); v.add_item(P(options=[discord.SelectOption(label=f"Preset {x}", value=str(x)) for x in range(1,14)]))
     await interaction.followup.send(content=f"{E_MOD} Select Preset:", view=v)
 
-@bot.tree.command(name="macro", description="Parses raw exported Audacity macro TXT settings onto a target file")
-@app_commands.describe(audio_file="Target sound asset file", macro_file="The macro text layout file from Audacity (.txt)")
+@bot.tree.command(name="macro", description="Parses raw exported Audacity macro TXT settings")
+@app_commands.describe(audio_file="Target asset file", macro_file="The macro text file (.txt)")
 async def macro(interaction: discord.Interaction, audio_file: discord.Attachment, macro_file: discord.Attachment):
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer()
+    except discord.errors.NotFound: return
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
@@ -537,48 +519,38 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
         
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
-        await status_msg.edit(content=f"{E_SUCCESS} Macro applied successfully.")
+        await status_msg.edit(content=f"{E_SUCCESS} Macro applied.")
         await interaction.followup.send(file=discord.File(op))
     else:
-        await status_msg.edit(content=f"{E_FAILED} Macro application failed.")
+        await status_msg.edit(content=f"{E_FAILED} Macro applied failed.")
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-@bot.tree.command(name="pitch", description="Shifts the playback rate and speed multiplier of an audio file")
-@app_commands.describe(audio_file="The source file sound asset to modify", val="Pitch multiplier factor (e.g. 1.05 or 0.90)")
+@bot.tree.command(name="pitch", description="Shifts playback rate of an audio file")
+@app_commands.describe(audio_file="Sound asset to modify", val="Pitch factor multiplier")
 async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment, val: float):
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer()
+    except discord.errors.NotFound: return
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"
     await audio_file.save(ip)
     
     def run():
-        input_rate = 44100
-        new_rate = int(input_rate * val)
-        subprocess.run([
-            'ffmpeg', '-i', ip, 
-            '-af', f"asetrate={new_rate},aresample={input_rate}", 
-            '-c:a', 'libvorbis', '-q:a', '5', op, '-y'
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['ffmpeg', '-i', ip, '-af', f"asetrate={int(44100*val)},aresample=44100", '-c:a', 'libvorbis', '-q:a', '5', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
-        await status_msg.edit(content=f"{E_SUCCESS} Shifted Pitch and Speed perfectly.")
+        await status_msg.edit(content=f"{E_SUCCESS} Shifted Pitch perfectly.")
         await interaction.followup.send(file=discord.File(op))
     else:
         await status_msg.edit(content=f"{E_FAILED} Pitch alteration failed.")
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
-@bot.tree.command(name="tpos", description="Conjoins a bait introductory segment cleanly in front of a primary source file")
-@app_commands.describe(bait="The introductory sound file asset to inject first", main="The primary track sound file asset to follow behind")
+@bot.tree.command(name="tpos", description="Conjoins a bait segment cleanly in front of main track")
+@app_commands.describe(bait="Introductory sound asset", main="Primary track asset")
 async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main: discord.Attachment):
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer()
+    except discord.errors.NotFound: return
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
@@ -593,38 +565,31 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
         await status_msg.edit(content=f"{E_FAILED} Injection build failed.")
     [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
-@bot.tree.command(name="bait", description="Mixes an audio track directly into an pre-existing template option path context")
-@app_commands.describe(choice="The template selection option ID", audio_file="Your target main audio sound file track")
+@bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
+@app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
 async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17"], audio_file: discord.Attachment):
-    try:
-        await interaction.response.defer()
-    except discord.errors.NotFound:
-        return
+    try: await interaction.response.defer()
+    except discord.errors.NotFound: return
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
     await audio_file.save(ip)
-    
     cfg = BAIT_MAP[choice]
     
     def run_bait_mixing():
         main_track = AudioSegment.from_file(ip)
         bait1_path = find_file(cfg["files"][0])
-        if not bait1_path:
-            raise FileNotFoundError(f"Missing base template asset: {cfg['files'][0]}")
+        if not bait1_path: raise FileNotFoundError(f"Missing base template asset: {cfg['files'][0]}")
         bait_track1 = AudioSegment.from_file(bait1_path)
         
         if cfg.get("type") == "sandwich":
             bait2_path = find_file(cfg["files"][1])
-            if not bait2_path:
-                raise FileNotFoundError(f"Missing end template asset: {cfg['files'][1]}")
+            if not bait2_path: raise FileNotFoundError(f"Missing end template asset: {cfg['files'][1]}")
             bait_track2 = AudioSegment.from_file(bait2_path)
             res = bait_track1 + main_track + bait_track2
         else:
             res = bait_track1 + main_track
-            
-        res = res[:419999]
-        res.export(op, format="ogg")
+        res[:419999].export(op, format="ogg")
         
     try:
         await asyncio.get_event_loop().run_in_executor(None, run_bait_mixing)
@@ -635,7 +600,6 @@ async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4"
             await status_msg.edit(content=f"{E_FAILED} Build combination failed.")
     except Exception as e:
         await status_msg.edit(content=f"{E_FAILED} Processing failed: {str(e)}")
-        
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
 if __name__ == "__main__":
