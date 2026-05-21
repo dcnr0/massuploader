@@ -50,11 +50,16 @@ SEARCH_DIRS = [
     os.path.join(d, "assets") if os.path.isdir(os.path.join(BASE_DIR, "assets")) else BASE_DIR for d in [BASE_DIR]
 ]
 
-# --- CRITICAL FFMPEG FIX FOR PYDUB ---
+# --- CRITICAL FFMPEG FIX FOR PYDUB (RENDER COMPATIBLE) ---
 FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg")
 if os.name == 'nt' and not FFMPEG_BIN.endswith('.exe'): 
     FFMPEG_BIN += '.exe'
-AudioSegment.converter = FFMPEG_BIN
+
+# Fallback to system-installed paths if the local directory binary is missing
+if os.path.exists(FFMPEG_BIN):
+    AudioSegment.converter = FFMPEG_BIN
+else:
+    AudioSegment.converter = "ffmpeg"
 
 AUTH_DATA = {} 
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲⚠️⚡🔥")
@@ -161,10 +166,10 @@ def scramble_binary(raw_data: bytearray):
     raw_data.extend(os.urandom(random.randint(128, 512)))
     return bytes(raw_data)
 
-# --- FIXED HIGH PERFORMANCE COOLDOWN WORKER ---
+# --- COOLDOWN VARIATIONS WORKER ---
 def core_process_worker(base_segment, i, batch_stutter_ms, scramble_enabled):
     try:
-        # Safe duplicate clone initialization from pre-loaded main thread asset
+        # Clone segment safely from memory allocation context
         audio = base_segment + 0
         warp = random.uniform(0.99, 1.01)
         audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
@@ -290,7 +295,6 @@ async def massupload(
     status_msg = await interaction.followup.send(content=f"{E_LDING} Initializing conversions engine...")
     acc = AUTH_DATA[interaction.user.id]
     
-    # --- CRITICAL STABILITY FIX: Parse sound file once securely on the main thread loop ---
     try:
         raw_audio_bytes = await audio_file.read()
         base_segment = AudioSegment.from_file(io.BytesIO(raw_audio_bytes))
@@ -303,7 +307,6 @@ async def massupload(
     
     await status_msg.edit(content=f"{E_LDING} Generating audio modifications loop...")
     
-    # Managed concurrency pool keeps gateway stable
     with ThreadPoolExecutor(max_workers=3) as pool:
         process_tasks = [
             loop.run_in_executor(pool, core_process_worker, base_segment, idx, batch_stutter_ms, scramble) 
@@ -346,7 +349,6 @@ async def massupload(
                 
             status_lines.append(line)
             
-            # Rate limit dashboard edits to keep gateway running smoothly
             now = datetime.datetime.now().timestamp()
             if (now - last_ui_update > 1.6) or (processed_count == total_payloads):
                 last_ui_update = now
