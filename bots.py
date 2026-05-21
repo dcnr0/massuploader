@@ -101,7 +101,8 @@ class ZeptiV77(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=0))
+        # Keeps persistent connector live for rapid requests
+        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=0, ttl_dns_cache=300))
         await self.tree.sync()
 
     async def on_ready(self):
@@ -169,7 +170,6 @@ def scramble_binary(raw_data: bytearray):
 # --- COOLDOWN VARIATIONS WORKER ---
 def core_process_worker(base_segment, i, batch_stutter_ms, scramble_enabled):
     try:
-        # Clone segment safely from memory allocation context
         audio = base_segment + 0
         warp = random.uniform(0.99, 1.01)
         audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
@@ -199,7 +199,7 @@ def core_process_worker(base_segment, i, batch_stutter_ms, scramble_enabled):
 # --- FIRE AND FORGET OUTBOUND UPLOADER LOOP ---
 async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
-    current_delay = 0.5
+    current_delay = 0.25  # Lowered delay for extreme speed boost
     
     for attempt in range(1, 20):
         form = aiohttp.FormData(quote_fields=False)
@@ -210,14 +210,14 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
         form.add_field('fileContent', data, filename=f'{os.urandom(4).hex()}.mp3', content_type='audio/mpeg')
 
         try:
-            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
+            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=12) as r:
                 resp_text = await r.text()
                 if r.status in [200, 201, 202]:
                     await live_status_callback(success=True, name=name)
                     return True
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
-                    current_delay = min(current_delay * 1.5, 5.0)
+                    current_delay = min(current_delay * 1.3, 4.0)
                 else:
                     try:
                         err_msg = json.loads(resp_text).get("message", resp_text)
@@ -227,7 +227,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
                     if r.status in [401, 403, 400]:
                         return False
         except Exception:
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.25)
             
     await live_status_callback(success=False, name=name, detail="Retries Exhausted")
     return False
@@ -307,7 +307,8 @@ async def massupload(
     
     await status_msg.edit(content=f"{E_LDING} Generating audio modifications loop...")
     
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # Speed Optimization: Expanded Thread Pool worker capacity to handle variations layout simultaneously
+    with ThreadPoolExecutor(max_workers=10) as pool:
         process_tasks = [
             loop.run_in_executor(pool, core_process_worker, base_segment, idx, batch_stutter_ms, scramble) 
             for idx in range(1, 11)
@@ -325,8 +326,6 @@ async def massupload(
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    connector = aiohttp.TCPConnector(limit=0, force_close=False)
-    
     total_payloads = len(payloads)
     processed_count = 0
     success_count = 0
@@ -361,12 +360,12 @@ async def massupload(
                 except Exception:
                     pass
 
-    async with aiohttp.ClientSession(connector=connector) as session:
-        upload_tasks = [
-            upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_update_worker)
-            for d_name, data, idx in payloads
-        ]
-        await asyncio.gather(*upload_tasks)
+    # Speed Optimization: Uses global persistent connection framework instead of rebuilding custom instances
+    upload_tasks = [
+        upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_update_worker)
+        for d_name, data, idx in payloads
+    ]
+    await asyncio.gather(*upload_tasks)
         
     if success_count > 0:
         await interaction.channel.send(f"✅ Open Cloud Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
@@ -443,6 +442,12 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                         'skip': ['authcheck']
                     }
                 },
+                # Fix: Mimics standard web interactions to prevent Render server IP blocking
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-us,en;q=0.5',
+                },
                 'quiet': True,
                 'no_warnings': True
             }
@@ -456,7 +461,7 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
             await interaction.followup.send(file=discord.File(final_filename))
             os.remove(final_filename)
         else:
-            await status_msg.edit(content=f"{E_FAILED} Build output missing.")
+            await status_msg.edit(content=f"{E_FAILED} Build output missing. Link might be restricted.")
     except Exception as e: 
         await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
