@@ -301,7 +301,9 @@ async def massupload(
     
     loop = asyncio.get_running_loop()
     
-    with ThreadPoolExecutor(max_workers=10) as pool:
+    # CRITICAL FIX: Limit max workers to 2 or 3. This spaces out the FFmpeg processing 
+    # demands slightly so your host CPU does not lock up and drop the Discord shard.
+    with ThreadPoolExecutor(max_workers=3) as pool:
         process_tasks = [
             loop.run_in_executor(pool, core_process_worker, raw_audio_bytes, idx, batch_stutter_ms, scramble) 
             for idx in range(1, 11)
@@ -319,8 +321,6 @@ async def massupload(
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    
-    # Force full concurrent connection flow 
     connector = aiohttp.TCPConnector(limit=0, force_close=False)
     
     total_payloads = len(payloads)
@@ -329,8 +329,11 @@ async def massupload(
     status_lines = []
     lock = asyncio.Lock()
     
+    # Track dashboard states to update message via background loop safely
+    last_ui_update = 0
+    
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None):
-        nonlocal processed_count, success_count
+        nonlocal processed_count, success_count, last_ui_update
         async with lock:
             processed_count += 1
             if success:
@@ -344,14 +347,19 @@ async def massupload(
                 
             status_lines.append(line)
             
-            current_dashboard = (
-                f"**Burst Upload Progression:** ({processed_count}/{total_payloads})\n"
-                + "\n".join(status_lines)
-            )
-            try:
-                await status_msg.edit(content=current_dashboard)
-            except Exception:
-                pass
+            # CRITICAL FIX: Only edit the Discord Message UI if 1.5 seconds have passed 
+            # OR if it's the absolute final file. Prevents gateway congestion and rate limits.
+            now = datetime.datetime.now().timestamp()
+            if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
+                last_ui_update = now
+                current_dashboard = (
+                    f"**Burst Upload Progression:** ({processed_count}/{total_payloads})\n"
+                    + "\n".join(status_lines)
+                )
+                try:
+                    await status_msg.edit(content=current_dashboard)
+                except Exception:
+                    pass
 
     async with aiohttp.ClientSession(connector=connector) as session:
         upload_tasks = [
@@ -364,7 +372,7 @@ async def massupload(
         await interaction.channel.send(f"✅ Open Cloud Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
     else:
         await interaction.channel.send(f"❌ Batch Session terminated. All execution processes dropped or rejected.")
-
+        
 @bot.tree.command(name="method", description="Processes audio through complex phase or distortion bypass loops")
 @app_commands.describe(audio_file="The source sound asset to process")
 async def bypass_method(interaction: discord.Interaction, audio_file: discord.Attachment):
