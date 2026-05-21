@@ -51,7 +51,7 @@ SEARCH_DIRS = [
 ]
 
 AUTH_DATA = {} 
-EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲😴🤤😪😵🤐🤢🤮🤧😷🤒🤕🤑🤠😈👿👹👺🤡💩👻💀☠️👽👾🤖🎃😺😸😹😻😼😽🙀😿😾🤲👐🙌👏👏🤝👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍💄💋👄👅👂👃👣👁👀🧠🗣👤👥👶👧🧒👦👩🧑👨👱‍♀️👱‍♂️🧔👵🧓👴👲👳‍♀️👳‍♂️🧕👮‍♀️👮‍♂️👷‍♀️👷‍♂️💂‍♀️💂‍♂️🕵️‍♀️🕵️‍♂️👩‍⚕️👨‍⚕️👩‍🌾👨‍🌾👩‍🍳👨‍🍳👩‍🎓👨‍🎓👩‍🎤👨‍🎤👩‍🏫👨‍🏫👩‍🏭👨‍🏭👩‍💻👨‍💻👩‍💼👨‍💼👩‍🔧👨‍🔧👩‍🔬👨‍🔬👩‍🎨👨‍🎨👩‍🚒👨‍🚒👩‍✈️👨‍✈️👩‍🚀👨‍🚀👩‍⚖️👨‍⚖️👰🤵👸🤴🤶🎅🧙‍♀️🧙‍♂️🧝‍♀️🧝‍♂️🧛‍♀️🧛‍♂️🧟‍♀️🧟‍♂️🧞‍♀️🧞‍♂️🧜‍♀️🧜‍♂️🧚‍♀️🧚‍♂️👼🤰🤱🙇‍♀️🙇‍♂️💁‍♀️💁‍♂️🙅‍♀️🙅‍♂️🙆‍♀️🙆‍♂️🙋‍♀️🙋‍♂️🤦‍♀️🤦‍♂️🤷‍♀️🤷‍♂️🙎‍♀️🙎‍♂️🙍‍♀️🙍‍♂️💇‍♀️💇‍♂️💆‍♀️💆‍♂️🧖‍♀️🧖‍♂️💅🤳💃🕺👯‍♀️👯‍♂️🕴🚶‍♀️🚶‍♂️RUN")
+EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲😴🤤😪😵🤐🤢🤮🤧😷🤒🤕🤑🤠😈👿👹👺🤡💩👻💀☠️👽👾🤖🎃😺😸😹😻😼😽🙀😿😾🤲👐🙌👏👏🤝👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍💄💋👄👅👂👃👣👁👀🧠🗣👤👥👶👧🧒👦👩🧑👨👱‍♀️👱‍♂️🧔👵🧓👴👲👳‍♀️👳‍♂️🧕👮‍♀️👮‍♂️👷‍♀️👷‍♂️💂‍♀️💂‍♂️🕵️‍♀️🕵️‍♂️👩‍⚕️👨‍⚕️👩‍🌾👨‍🌾👩‍🍳👨‍🍳👩‍🎓👨‍🎓👩‍🎤👨‍🎤👩‍🏫👨‍🏫👩‍🏭👨‍🏭👩‍💻👨‍💻👩‍💼👨‍💼👩‍🔧👨‍🔧👩‍🔬👨‍🔬👩‍🎨👨‍🎨👩‍Camp👍👎👊✊🤛🤜🤞✌️🤟🤘👌👈👉👆👇☝️✋🤚🖐🖖👋🤙💪🖕✍️🙏💍")
 
 # Fixed Application Emoji Formatting
 E_MOD = "<a:mod:1506265969562226738>"
@@ -126,7 +126,6 @@ def get_loud_preset(pid):
     }
     return presets.get(str(pid), presets["1"])
 
-# --- MASSER INTEGRATED AUDIO TITLE CONFIGURATION ---
 def get_preset_title(style, index, custom_name):
     letters = string.ascii_letters
     nums = string.digits
@@ -156,11 +155,9 @@ def scramble_binary(raw_data: bytearray):
     raw_data.extend(os.urandom(random.randint(128, 512)))
     return bytes(raw_data)
 
-# --- MASSER FAST PIPELINE SYNCHRONOUS WORKER ---
 def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
     try:
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
-        
         warp = random.uniform(0.99, 1.01)
         audio = audio._spawn(audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * warp)})
         audio = audio.set_frame_rate(44100)
@@ -183,15 +180,15 @@ def core_process_worker(audio_bytes, i, batch_stutter_ms, scramble_enabled):
         gc.collect()
         return final_val
     except Exception as e:
-        print(f"[Processing Error] Sync worker variant task {i} failed: {e}")
+        print(f"[Processing Error] Task {i} failed: {e}")
         return None
 
-# --- MASSER API BURST UPLOADER LOOP ---
+# --- HIGH SPEED ULTRA OUTBOUND UPLOADER (NO POLLING BLOCKING) ---
 async def upload_burst(session, data, name, api_key, target_id, creator_key, idx, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
-    current_delay = 1.0
+    current_delay = 0.5  # Reduced initial delay for faster retries
     
-    for attempt in range(1, 51):  # Max retries fallback limitation chain
+    for attempt in range(1, 20):  # Cap retries to prevent long lockups
         form = aiohttp.FormData(quote_fields=False)
         form.add_field('request', json.dumps({
             "assetType": "Audio", "displayName": name, "description": "zepti_W",
@@ -200,38 +197,17 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
         form.add_field('fileContent', data, filename=f'{os.urandom(4).hex()}.mp3', content_type='audio/mpeg')
 
         try:
-            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=30) as r:
+            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
                 resp_text = await r.text()
                 
+                # Instantly accept 200 OK, 201 Created, or 202 Accepted and report to interface
                 if r.status in [200, 201, 202]:
-                    try:
-                        resp_json = json.loads(resp_text)
-                        operation_id = resp_json.get("path") or resp_json.get("operationId")
-                        if operation_id:
-                            op_url = f"https://apis.roblox.com/assets/v1/{operation_id}" if not operation_id.startswith("http") else operation_id
-                            for _ in range(6):
-                                await asyncio.sleep(2)
-                                async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
-                                    if op_r.status == 200:
-                                        op_json = json.loads(await op_r.text())
-                                        if op_json.get("done") is True:
-                                            if "error" in op_json:
-                                                await live_status_callback(success=False, name=name, detail=op_json['error'].get('message'))
-                                                return False
-                                            await live_status_callback(success=True, name=name)
-                                            return True
-                            await live_status_callback(success=True, name=name, detail="No Polling Sync")
-                            return True
-                        
-                        await live_status_callback(success=True, name=name)
-                        return True
-                    except:
-                        await live_status_callback(success=True, name=name)
-                        return True
+                    await live_status_callback(success=True, name=name)
+                    return True
                         
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
-                    current_delay = min(current_delay * 1.5, 15.0)
+                    current_delay = min(current_delay * 1.5, 5.0)
                 else:
                     try:
                         err_msg = json.loads(resp_text).get("message", resp_text)
@@ -241,7 +217,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, idx
                     if r.status in [401, 403, 400]:
                         return False
         except Exception as e:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             
     await live_status_callback(success=False, name=name, detail="Retries Exhausted")
     return False
@@ -301,7 +277,6 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to {'Group' if is_group else 'User'} ID: **{target_id}**.", ephemeral=True)
 
-# --- REFACTORED HIGH-SPEED PARALLEL ROBLOX UPLOADER ---
 @bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies of an audio track concurrently to Roblox Cloud")
 @app_commands.describe(audio_file="Sound asset to batch upload", title="Base display name configuration", style="Title randomized modifier generation style pattern", scramble="Enable asset binary signature scrambling loop")
 async def massupload(
@@ -319,7 +294,6 @@ async def massupload(
     except discord.errors.NotFound:
         return
         
-    # Set custom processing message text
     status_msg = await interaction.followup.send(content=f"{E_LDING} Massuploading...")
     acc = AUTH_DATA[interaction.user.id]
     raw_audio_bytes = await audio_file.read()
@@ -327,7 +301,6 @@ async def massupload(
     
     loop = asyncio.get_running_loop()
     
-    # 1. ThreadPool Concurrent Audio Transformation Variations Execution
     with ThreadPoolExecutor(max_workers=10) as pool:
         process_tasks = [
             loop.run_in_executor(pool, core_process_worker, raw_audio_bytes, idx, batch_stutter_ms, scramble) 
@@ -335,7 +308,6 @@ async def massupload(
         ]
         prepared_payload_data = await asyncio.gather(*process_tasks)
     
-    # Pack rendered bytes and build custom tracking variations lists
     payloads = []
     for idx, data in enumerate(prepared_payload_data, 1):
         if data is not None:
@@ -347,16 +319,16 @@ async def massupload(
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    connector = aiohttp.TCPConnector(limit=5, force_close=False)
     
-    # --- LIVE REPORT CONTEXT VARIABLES ---
+    # Force full concurrent connection flow 
+    connector = aiohttp.TCPConnector(limit=0, force_close=False)
+    
     total_payloads = len(payloads)
     processed_count = 0
     success_count = 0
     status_lines = []
     lock = asyncio.Lock()
     
-    # Live status callback helper
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None):
         nonlocal processed_count, success_count
         async with lock:
@@ -372,7 +344,6 @@ async def massupload(
                 
             status_lines.append(line)
             
-            # Construct real-time message text string output layout
             current_dashboard = (
                 f"**Burst Upload Progression:** ({processed_count}/{total_payloads})\n"
                 + "\n".join(status_lines)
@@ -380,9 +351,8 @@ async def massupload(
             try:
                 await status_msg.edit(content=current_dashboard)
             except Exception:
-                pass # Safeguard against Discord API frame editing bottlenecks
+                pass
 
-    # 2. Async ClientSession Burst Mass Upload Dispatch Logic
     async with aiohttp.ClientSession(connector=connector) as session:
         upload_tasks = [
             upload_burst(session, data, d_name, acc["apikey"], acc["targetId"], creator_key, idx, status_update_worker)
@@ -390,7 +360,6 @@ async def massupload(
         ]
         await asyncio.gather(*upload_tasks)
         
-    # Final Output Summary Statement Adjustments
     if success_count > 0:
         await interaction.channel.send(f"✅ Open Cloud Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
     else:
