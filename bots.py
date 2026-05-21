@@ -438,6 +438,11 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
                 }],
+                'extractor_args': {
+                    'youtubetab': {
+                        'skip': ['authcheck']
+                    }
+                },
                 'quiet': True,
                 'no_warnings': True
             }
