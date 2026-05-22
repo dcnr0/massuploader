@@ -85,9 +85,9 @@ BAIT_MAP = {
     "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
     "14": {"files": ["my bait.mp3"], "type": "start"},
     "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
-    "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"},
-    "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"}
-    "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"}
+    "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"}, # <-- Added missing comma
+    "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"}, # <-- Added missing comma
+    "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"}, # <-- Added missing comma
     "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
 }
 
