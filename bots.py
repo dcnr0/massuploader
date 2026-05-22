@@ -85,9 +85,9 @@ BAIT_MAP = {
     "13": {"files": ["p4w3l bait.mp3"], "type": "start"},
     "14": {"files": ["my bait.mp3"], "type": "start"},
     "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
-    "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"}, # <-- Added missing comma
-    "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"}, # <-- Added missing comma
-    "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"}, # <-- Added missing comma
+    "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"},
+    "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"},
+    "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"},
     "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
 }
 
@@ -102,7 +102,6 @@ class ZeptiV77(commands.Bot):
         await self.tree.sync()
 
     async def on_ready(self):
-        # FIX: Rectified brackets inside datetime format string setup
         print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Zepti_W V77.0: ONLINE")
 
 bot = ZeptiV77()
@@ -194,15 +193,39 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
             async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
                 resp_text = await r.text()
                 if r.status in [200, 201, 202]:
-                    try:
-                        parsed = json.loads(resp_text)
-                        asset_id = parsed.get("assetId", "Unknown ID")
-                    except:
-                        asset_id = "Processed"
-                        
                     if "error" in resp_text.lower():
                         await live_status_callback(success=False, name=name, detail="API Internal Drop", asset_id=None)
                         return False
+                        
+                    try:
+                        parsed = json.loads(resp_text)
+                        # Extract the async Operation path layout (e.g. "operations/xxxx-xxxx...")
+                        operation_path = parsed.get("path")
+                        
+                        if operation_path:
+                            # Poll the operations endpoint to fetch the completed Asset ID
+                            op_url = f"https://apis.roblox.com/assets/v1/{operation_path}"
+                            asset_id = None
+                            
+                            for _ in range(4): # Poll up to 4 times
+                                await asyncio.sleep(1.0)
+                                async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
+                                    if op_r.status == 200:
+                                        op_parsed = json.loads(await op_r.text())
+                                        if op_parsed.get("done") is True:
+                                            # Grab target ID out of the operation response layout
+                                            asset_id = op_parsed.get("response", {}).get("assetId")
+                                            break
+                            
+                            if not asset_id:
+                                # Fallback fallback directly from regex if operation details take too long
+                                match = re.search(r'operations/([a-fA-H0-9\-]+)', operation_path)
+                                asset_id = match.group(1) if match else "ID Pending"
+                        else:
+                            asset_id = parsed.get("assetId", "Upload Queued")
+                    except:
+                        asset_id = "Upload Queued"
+                        
                     await live_status_callback(success=True, name=name, detail=None, asset_id=asset_id)
                     return True
                 elif r.status == 429:
@@ -515,7 +538,7 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
 @app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], audio_file: discord.Attachment):
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17"], audio_file: discord.Attachment):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
