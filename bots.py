@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, gc
+import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, gc, shutil
 from pydub import AudioSegment
 from pedalboard import (
     Pedalboard, Compressor, Gain, Limiter, LowShelfFilter, 
@@ -15,13 +15,19 @@ from typing import Literal, Optional
 from flask import Flask
 from threading import Thread
 
-# --- AUTO-INSTALL YT-DLP IF MISSING ---
+# --- AUTO-INSTALL DEPENDENCIES IF MISSING ---
 try:
     import yt_dlp
 except ImportError:
     import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
     import yt_dlp
+
+try:
+    import spotdl
+except ImportError:
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "spotdl"])
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
@@ -416,49 +422,80 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
     v = discord.ui.View(); v.add_item(MethodSelect(placeholder="Choose Bypass Method", options=[discord.SelectOption(label="8D Audio", value="8d"), discord.SelectOption(label="Copyright Bypass", value="copyright")]))
     await interaction.followup.send(content=f"{E_MOD} Select Method:", view=v)
 
-@bot.tree.command(name="mp3", description="Downloads web audio links cleanly")
+@bot.tree.command(name="mp3", description="Downloads web audio links cleanly (Bypasses Spotify DRM with spotdl)")
 @app_commands.describe(url="Web url link to extract audio from")
 async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Stream scraping audio streams (Optimized)...")
     uid = get_uid()
-    template_path = f"m_{uid}"
-    final_filename = f"m_{uid}.mp3"
     
-    try:
-        async def run_with_timeout():
-            def dl():
-                ydl_opts = {
-                    'format': 'ba/w',
-                    'outtmpl': template_path,
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '128',
-                    }],
-                    'extractor_args': {'youtubetab': {'skip': ['authcheck']}},
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                    },
-                    'quiet': True,
-                    'no_warnings': True
-                }
-                cookie_file = os.path.join(BASE_DIR, "cookies.txt")
-                if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-            await asyncio.get_event_loop().run_in_executor(None, dl)
+    if "spotify.com" in url.lower():
+        try:
+            tmp_spot_dir = f"spot_{uid}"
+            os.makedirs(tmp_spot_dir, exist_ok=True)
+            
+            cmd = ['spotdl', 'download', url, '--output', f"{tmp_spot_dir}/track.mp3"]
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            try:
+                await asyncio.wait_for(proc.communicate(), timeout=40)
+            except asyncio.TimeoutError:
+                proc.kill()
+                raise asyncio.TimeoutError("Spotify extraction timed out.")
 
-        await asyncio.wait_for(run_with_timeout(), timeout=40)
-        
-        if os.path.exists(final_filename):
-            await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped target track format.")
-            await interaction.followup.send(file=discord.File(final_filename))
-            os.remove(final_filename)
-        else: await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
-    except asyncio.TimeoutError:
-        await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP is currently restricted by platform provider.")
-    except Exception as e: 
-        await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
+            expected_file = f"{tmp_spot_dir}/track.mp3"
+            if os.path.exists(expected_file):
+                await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped Spotify track format.")
+                await interaction.followup.send(file=discord.File(expected_file))
+                os.remove(expected_file)
+                os.rmdir(tmp_spot_dir)
+            else:
+                await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by spotdl search.")
+                if os.path.exists(tmp_spot_dir):
+                    shutil.rmtree(tmp_spot_dir)
+        except Exception as e:
+            await status_msg.edit(content=f"{E_FAILED} Failed SpotDL: {e}")
+            if os.path.exists(f"spot_{uid}"):
+                shutil.rmtree(f"spot_{uid}")
+            
+    else:
+        template_path = f"m_{uid}"
+        final_filename = f"m_{uid}.mp3"
+        try:
+            async def run_with_timeout():
+                def dl():
+                    ydl_opts = {
+                        'format': 'ba/w',
+                        'outtmpl': template_path,
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'mp3',
+                            'preferredquality': '128',
+                        }],
+                        'extractor_args': {'youtubetab': {'skip': ['authcheck']}},
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                        },
+                        'quiet': True,
+                        'no_warnings': True
+                    }
+                    cookie_file = os.path.join(BASE_DIR, "cookies.txt")
+                    if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+                await asyncio.get_event_loop().run_in_executor(None, dl)
+
+            await asyncio.wait_for(run_with_timeout(), timeout=40)
+            
+            if os.path.exists(final_filename):
+                await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped target track format.")
+                await interaction.followup.send(file=discord.File(final_filename))
+                os.remove(final_filename)
+            else: 
+                await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
+        except asyncio.TimeoutError:
+            await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP is currently restricted by platform provider.")
+        except Exception as e: 
+            await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
 @bot.tree.command(name="loudset", description="Alters audio using mastering presets")
 @app_commands.describe(audio_file="The sound asset to master")
