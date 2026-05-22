@@ -100,7 +100,8 @@ class ZeptiV77(commands.Bot):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f"[{datetime.datetime.now().strftime('%H('%M:%S')}] Zepti_W V77.0: ONLINE")
+        # FIX: Rectified brackets inside datetime format string setup
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Zepti_W V77.0: ONLINE")
 
 bot = ZeptiV77()
 
@@ -193,7 +194,6 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                 if r.status in [200, 201, 202]:
                     try:
                         parsed = json.loads(resp_text)
-                        # Extract the unique assetId string field from Roblox response body
                         asset_id = parsed.get("assetId", "Unknown ID")
                     except:
                         asset_id = "Processed"
@@ -299,7 +299,7 @@ async def massupload(
     total_payloads = len(payloads)
     processed_count = success_count = 0
     status_lines = []
-    accepted_assets_summary = [] # Holds the tuple pairs of (name, id) for final feedback
+    accepted_assets_summary = []
     lock = asyncio.Lock()
     last_ui_update = 0
     
@@ -331,7 +331,6 @@ async def massupload(
         
     await asyncio.gather(*upload_tasks)
         
-    # --- TAILORED SUMMARY VERIFICATION BLOCKS ---
     if success_count == 0:
         await interaction.channel.send(f"{E_FAILED} None accepted. :(")
     else:
