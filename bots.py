@@ -538,7 +538,7 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
 @app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17"], audio_file: discord.Attachment):
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], audio_file: discord.Attachment):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
