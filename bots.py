@@ -49,7 +49,6 @@ SEARCH_DIRS = [
     os.path.join(d, "assets") if os.path.isdir(os.path.join(BASE_DIR, "assets")) else BASE_DIR for d in [BASE_DIR]
 ]
 
-# --- CRITICAL FFMPEG FIX FOR PYDUB (RENDER COMPATIBLE) ---
 FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg")
 if os.name == 'nt' and not FFMPEG_BIN.endswith('.exe'): 
     FFMPEG_BIN += '.exe'
@@ -101,7 +100,7 @@ class ZeptiV77(commands.Bot):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Zepti_W V77.0: ONLINE")
+        print(f"[{datetime.datetime.now().strftime('%H('%M:%S')}] Zepti_W V77.0: ONLINE")
 
 bot = ZeptiV77()
 
@@ -146,7 +145,6 @@ def get_preset_title(style, index, custom_name):
     return f"{custom_name}{index}"
 
 async def async_process_ffmpeg(ip, idx, batch_stutter, scramble_enabled):
-    """Lightning-fast audio modifications using highly-optimized direct native FFmpeg"""
     u = get_uid()
     op = f"v_out_{u}_{idx}.mp3"
     warp = random.uniform(0.99, 1.01)
@@ -179,31 +177,44 @@ async def async_process_ffmpeg(ip, idx, batch_stutter, scramble_enabled):
 
 async def upload_burst(session, data, name, api_key, target_id, creator_key, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
-    current_delay = 0.15
-    for attempt in range(1, 15):
+    current_delay = 0.5
+    
+    for attempt in range(1, 10):
         form = aiohttp.FormData(quote_fields=False)
         form.add_field('request', json.dumps({
             "assetType": "Audio", "displayName": name, "description": "zepti_W",
             "creationContext": {"creator": {creator_key: str(target_id)}}
         }), content_type='application/json')
-        form.add_field('fileContent', data, filename=f'{os.urandom(4).hex()}.mp3', content_type='audio/mpeg')
+        form.add_field('fileContent', data, filename='audio.mp3', content_type='audio/mpeg')
+        
         try:
-            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=10) as r:
+            async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
                 resp_text = await r.text()
                 if r.status in [200, 201, 202]:
-                    await live_status_callback(success=True, name=name)
+                    try:
+                        parsed = json.loads(resp_text)
+                        # Extract the unique assetId string field from Roblox response body
+                        asset_id = parsed.get("assetId", "Unknown ID")
+                    except:
+                        asset_id = "Processed"
+                        
+                    if "error" in resp_text.lower():
+                        await live_status_callback(success=False, name=name, detail="API Internal Drop", asset_id=None)
+                        return False
+                    await live_status_callback(success=True, name=name, detail=None, asset_id=asset_id)
                     return True
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
-                    current_delay = min(current_delay * 1.2, 3.0)
+                    current_delay = min(current_delay * 1.5, 5.0)
                 else:
                     try: err_msg = json.loads(resp_text).get("message", resp_text)
                     except: err_msg = resp_text
-                    await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}")
+                    await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}", asset_id=None)
                     if r.status in [401, 403, 400]: return False
         except:
-            await asyncio.sleep(0.15)
-    await live_status_callback(success=False, name=name, detail="Retries Exhausted")
+            await asyncio.sleep(0.5)
+            
+    await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None)
     return False
 
 # --- BOT COMMANDS ---
@@ -265,58 +276,70 @@ async def massupload(
     await audio_file.save(tmp_input)
 
     batch_stutter = random.randint(40, 220)
-    await status_msg.edit(content=f"{E_LDING} Executing lightning fast FFmpeg variant tasks...")
+    await status_msg.edit(content=f"{E_LDING} Building variation array streams safely...")
     
-    # Process variations entirely using native Linux fast streams instead of slow thread models
-    tasks = [async_process_ffmpeg(tmp_input, idx, batch_stutter, scramble) for idx in range(1, 11)]
-    prepared_payload_data = await asyncio.gather(*tasks)
+    prepared_payload_data = []
+    for idx in range(1, 11):
+        variant = await async_process_ffmpeg(tmp_input, idx, batch_stutter, scramble)
+        if variant:
+            prepared_payload_data.append(variant)
     
     try: os.remove(tmp_input)
     except: pass
 
     payloads = []
     for idx, data in enumerate(prepared_payload_data, 1):
-        if data is not None:
-            payloads.append((get_preset_title(style, idx, title), data))
+        payloads.append((get_preset_title(style, idx, title), data))
             
     if not payloads:
-        await status_msg.edit(content=f"{E_FAILED} File variant generation process timed out or collapsed.")
+        await status_msg.edit(content=f"{E_FAILED} Audio variant transformations dropped or collapsed.")
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
     total_payloads = len(payloads)
     processed_count = success_count = 0
     status_lines = []
+    accepted_assets_summary = [] # Holds the tuple pairs of (name, id) for final feedback
     lock = asyncio.Lock()
     last_ui_update = 0
     
-    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None):
+    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None):
         nonlocal processed_count, success_count, last_ui_update
         async with lock:
             processed_count += 1
             if success:
                 success_count += 1
                 line = f"<a:success:1506265759452631082> Success! {success_count}/{total_payloads} uploaded! [{name}]"
+                accepted_assets_summary.append((name, asset_id))
             else:
                 err_suffix = f" ({detail})" if detail else ""
                 line = f"<a:failed:1506265787900579994> Failed! [{name}]{err_suffix}"
                 
             status_lines.append(line)
             now = datetime.datetime.now().timestamp()
-            if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
+            if (now - last_ui_update > 2.0) or (processed_count == total_payloads):
                 last_ui_update = now
                 try: await status_msg.edit(content=f"**Progression:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
                 except: pass
 
     await status_msg.edit(content=f"{E_LDING} Burst dispatching payloads to Open Cloud routing arrays...")
-    upload_tasks = [
-        upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
-        for d_name, data in payloads
-    ]
+    
+    upload_tasks = []
+    for d_name, data in payloads:
+        upload_tasks.append(upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker))
+        await asyncio.sleep(0.15)
+        
     await asyncio.gather(*upload_tasks)
         
-    if success_count > 0: await interaction.channel.send(f"✅ Process Complete. Successfully uploaded **{success_count}/{total_payloads}** assets.")
-    else: await interaction.channel.send(f"❌ Batch Session terminated. All executions dropped.")
+    # --- TAILORED SUMMARY VERIFICATION BLOCKS ---
+    if success_count == 0:
+        await interaction.channel.send(f"{E_FAILED} None accepted. :(")
+    else:
+        summary_lines = [f"{E_SUCCESS} {success_count}/10 accepted! :)\n\n**__Accepted Asset Inventory Details:__**"]
+        for idx, (a_name, a_id) in enumerate(accepted_assets_summary, 1):
+            summary_lines.append(f"**{idx}. Name:** `{a_name}`\n┗ 🔗 **ID:** `{a_id}`")
+        
+        await interaction.channel.send("\n".join(summary_lines))
 
 @bot.tree.command(name="method", description="Processes audio through complex phase loops")
 @app_commands.describe(audio_file="The source sound asset")
@@ -361,35 +384,39 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     final_filename = f"m_{uid}.mp3"
     
     try:
-        def dl():
-            ydl_opts = {
-                # Optimization: Enforces pulling immediate sound pools only, discarding bulky manifest lists
-                'format': 'bestaudio/worst',
-                'outtmpl': template_path,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '144',
-                }],
-                'extractor_args': {'youtubetab': {'skip': ['authcheck']}},
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                },
-                'quiet': True,
-                'no_warnings': True
-            }
-            cookie_file = os.path.join(BASE_DIR, "cookies.txt")
-            if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-                
-        await asyncio.get_event_loop().run_in_executor(None, dl)
+        async def run_with_timeout():
+            def dl():
+                ydl_opts = {
+                    'format': 'ba/w',
+                    'outtmpl': template_path,
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '128',
+                    }],
+                    'extractor_args': {'youtubetab': {'skip': ['authcheck']}},
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                    },
+                    'quiet': True,
+                    'no_warnings': True
+                }
+                cookie_file = os.path.join(BASE_DIR, "cookies.txt")
+                if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
+            await asyncio.get_event_loop().run_in_executor(None, dl)
+
+        await asyncio.wait_for(run_with_timeout(), timeout=40)
+        
         if os.path.exists(final_filename):
             await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped target track format.")
             await interaction.followup.send(file=discord.File(final_filename))
             os.remove(final_filename)
         else: await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
-    except Exception as e: await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
+    except asyncio.TimeoutError:
+        await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP is currently restricted by platform provider.")
+    except Exception as e: 
+        await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
 @bot.tree.command(name="loudset", description="Alters audio using mastering presets")
 @app_commands.describe(audio_file="The sound asset to master")
