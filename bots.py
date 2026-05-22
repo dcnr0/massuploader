@@ -194,39 +194,49 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                 resp_text = await r.text()
                 if r.status in [200, 201, 202]:
                     if "error" in resp_text.lower():
-                        await live_status_callback(success=False, name=name, detail="API Internal Drop", asset_id=None)
+                        await live_status_callback(success=False, name=name, detail="API Internal Drop", asset_id=None, op_id=None)
                         return False
                         
                     try:
                         parsed = json.loads(resp_text)
-                        # Extract the async Operation path layout (e.g. "operations/xxxx-xxxx...")
                         operation_path = parsed.get("path")
-                        
+                        op_id = "Unknown Op"
                         if operation_path:
-                            # Poll the operations endpoint to fetch the completed Asset ID
+                            match = re.search(r'operations/([a-fA-H0-9\-]+)', operation_path)
+                            if match: op_id = match.group(1)
+
+                        if operation_path:
                             op_url = f"https://apis.roblox.com/assets/v1/{operation_path}"
                             asset_id = None
                             
-                            for _ in range(4): # Poll up to 4 times
-                                await asyncio.sleep(1.0)
+                            for _ in range(12): 
+                                await asyncio.sleep(1.5)
                                 async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
                                     if op_r.status == 200:
                                         op_parsed = json.loads(await op_r.text())
+                                        
+                                        if op_parsed.get("error"):
+                                            err_detail = op_parsed.get("error", {}).get("message", "Operation Processing Failed")
+                                            await live_status_callback(success=False, name=name, detail=err_detail, asset_id=None, op_id=op_id)
+                                            return False
+                                            
                                         if op_parsed.get("done") is True:
-                                            # Grab target ID out of the operation response layout
                                             asset_id = op_parsed.get("response", {}).get("assetId")
-                                            break
+                                            if asset_id:
+                                                break
                             
                             if not asset_id:
-                                # Fallback fallback directly from regex if operation details take too long
-                                match = re.search(r'operations/([a-fA-H0-9\-]+)', operation_path)
-                                asset_id = match.group(1) if match else "ID Pending"
+                                asset_id = "Pending Timeout"
                         else:
-                            asset_id = parsed.get("assetId", "Upload Queued")
-                    except:
-                        asset_id = "Upload Queued"
+                            asset_id = parsed.get("assetId", "Unknown ID")
+                    except Exception as e:
+                        asset_id = "Parsing Error"
                         
-                    await live_status_callback(success=True, name=name, detail=None, asset_id=asset_id)
+                    if asset_id in ["Pending Timeout", "Parsing Error"]:
+                        await live_status_callback(success=False, name=name, detail=asset_id, asset_id=None, op_id=op_id)
+                        return False
+                        
+                    await live_status_callback(success=True, name=name, detail=None, asset_id=asset_id, op_id=op_id)
                     return True
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
@@ -234,12 +244,12 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                 else:
                     try: err_msg = json.loads(resp_text).get("message", resp_text)
                     except: err_msg = resp_text
-                    await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}", asset_id=None)
+                    await live_status_callback(success=False, name=name, detail=f"HTTP {r.status}: {err_msg}", asset_id=None, op_id=None)
                     if r.status in [401, 403, 400]: return False
         except:
             await asyncio.sleep(0.5)
             
-    await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None)
+    await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
 # --- BOT COMMANDS ---
@@ -322,21 +332,22 @@ async def massupload(
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
     total_payloads = len(payloads)
-    processed_count = success_count = 0
+    processed_count = success_count = failed_count = 0
     status_lines = []
     accepted_assets_summary = []
     lock = asyncio.Lock()
     last_ui_update = 0
     
-    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None):
-        nonlocal processed_count, success_count, last_ui_update
+    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
+        nonlocal processed_count, success_count, failed_count, last_ui_update
         async with lock:
             processed_count += 1
             if success:
                 success_count += 1
-                line = f"<a:success:1506265759452631082> Success! {success_count}/{total_payloads} uploaded! [{name}]"
-                accepted_assets_summary.append((name, asset_id))
+                line = f"<a:success:1506265759452631082> Fully Pended! [{name}]"
+                accepted_assets_summary.append({"name": name, "asset_id": asset_id, "op_id": op_id})
             else:
+                failed_count += 1
                 err_suffix = f" ({detail})" if detail else ""
                 line = f"<a:failed:1506265787900579994> Failed! [{name}]{err_suffix}"
                 
@@ -344,10 +355,10 @@ async def massupload(
             now = datetime.datetime.now().timestamp()
             if (now - last_ui_update > 2.0) or (processed_count == total_payloads):
                 last_ui_update = now
-                try: await status_msg.edit(content=f"**Progression:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
+                try: await status_msg.edit(content=f"**Processing Dispatch Array:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
                 except: pass
 
-    await status_msg.edit(content=f"{E_LDING} Burst dispatching payloads to Open Cloud routing arrays...")
+    await status_msg.edit(content=f"{E_LDING} Burst dispatching and tracking operations pipeline (This takes a moment)...")
     
     upload_tasks = []
     for d_name, data in payloads:
@@ -357,11 +368,18 @@ async def massupload(
     await asyncio.gather(*upload_tasks)
         
     if success_count == 0:
-        await interaction.channel.send(f"{E_FAILED} None accepted. :(")
+        await interaction.channel.send(f"{E_FAILED} All variations failed processing filters.")
     else:
-        summary_lines = [f"{E_SUCCESS} {success_count}/10 accepted! :)\n\n**__Accepted Asset Inventory Details:__**"]
-        for idx, (a_name, a_id) in enumerate(accepted_assets_summary, 1):
-            summary_lines.append(f"**{idx}. Name:** `{a_name}`\n┗ 🔗 **ID:** `{a_id}`")
+        summary_lines = [
+            f"**__Mass Upload Session Finalization Stats__**",
+            f"📊 `Total: {total_payloads}` | ✅ `Success: {success_count}` | ❌ `Dropped: {failed_count}` | 📈 `Pass: {int((success_count/total_payloads)*100)}%`",
+            f"\n**__Accepted Asset Inventory Details:__**"
+        ]
+        
+        for idx, item in enumerate(accepted_assets_summary, 1):
+            summary_lines.append(
+                f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}` 🛠️ **Op:** `{item['op_id']}`"
+            )
         
         await interaction.channel.send("\n".join(summary_lines))
 
@@ -538,7 +556,11 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
 @app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], audio_file: discord.Attachment):
+async def bait(
+    interaction: discord.Interaction, 
+    choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], 
+    audio_file: discord.Attachment
+):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
