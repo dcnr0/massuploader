@@ -87,6 +87,8 @@ BAIT_MAP = {
     "15": {"files": ["remember1.mp3", "remember2.mp3"], "type": "sandwich"},
     "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"},
     "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"}
+    "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"}
+    "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
 }
 
 class ZeptiV77(commands.Bot):
@@ -513,7 +515,7 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
 @app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
-async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17"], audio_file: discord.Attachment):
+async def bait(interaction: discord.Interaction, choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], audio_file: discord.Attachment):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
