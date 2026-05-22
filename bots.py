@@ -215,14 +215,15 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                             op_url = f"https://apis.roblox.com/assets/v1/{operation_path}"
                             asset_id = None
                             
-                            for _ in range(12): 
-                                await asyncio.sleep(1.5)
+                            # Increased checking cycles to make sure it runs until absolute conclusion (Playable or Deleted)
+                            for _ in range(30): 
+                                await asyncio.sleep(2.0)
                                 async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
                                     if op_r.status == 200:
                                         op_parsed = json.loads(await op_r.text())
                                         
                                         if op_parsed.get("error"):
-                                            err_detail = op_parsed.get("error", {}).get("message", "Operation Processing Failed")
+                                            err_detail = op_parsed.get("error", {}).get("message", "Moderated/Processing Failed")
                                             await live_status_callback(success=False, name=name, detail=err_detail, asset_id=None, op_id=op_id)
                                             return False
                                             
@@ -232,13 +233,13 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                                                 break
                             
                             if not asset_id:
-                                asset_id = "Pending Timeout"
+                                asset_id = "Pending Timeout/Deleted"
                         else:
                             asset_id = parsed.get("assetId", "Unknown ID")
                     except Exception as e:
                         asset_id = "Parsing Error"
                         
-                    if asset_id in ["Pending Timeout", "Parsing Error"]:
+                    if asset_id in ["Pending Timeout/Deleted", "Parsing Error"]:
                         await live_status_callback(success=False, name=name, detail=asset_id, asset_id=None, op_id=op_id)
                         return False
                         
@@ -350,36 +351,37 @@ async def massupload(
             processed_count += 1
             if success:
                 success_count += 1
-                line = f"<a:success:1506265759452631082> Fully Pended! [{name}]"
+                line = f"<a:success:1506265759452631082> Fully Playable! [{name}]"
                 accepted_assets_summary.append({"name": name, "asset_id": asset_id, "op_id": op_id})
             else:
                 failed_count += 1
                 err_suffix = f" ({detail})" if detail else ""
-                line = f"<a:failed:1506265787900579994> Failed! [{name}]{err_suffix}"
+                line = f"<a:failed:1506265787900579994> Failed/Deleted! [{name}]{err_suffix}"
                 
             status_lines.append(line)
             now = datetime.datetime.now().timestamp()
             if (now - last_ui_update > 2.0) or (processed_count == total_payloads):
                 last_ui_update = now
-                try: await status_msg.edit(content=f"**Processing Dispatch Array:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
+                try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
                 except: pass
 
-    await status_msg.edit(content=f"{E_LDING} Burst dispatching and tracking operations pipeline (This takes a moment)...")
+    await status_msg.edit(content=f"{E_LDING} Running processing pipeline until all variations settle (Playable or Blocked)...")
     
     upload_tasks = []
     for d_name, data in payloads:
         upload_tasks.append(upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker))
         await asyncio.sleep(0.15)
         
+    # Wait until all backend loops have resolved either to Done or Error
     await asyncio.gather(*upload_tasks)
         
     if success_count == 0:
-        await interaction.channel.send(f"{E_FAILED} All variations failed processing filters.")
+        await status_msg.edit(content=f"{E_FAILED} All audio variations were removed or dropped by processing verification filters.")
     else:
         summary_lines = [
-            f"**__Mass Upload Session Finalization Stats__**",
-            f"📊 `Total: {total_payloads}` | ✅ `Success: {success_count}` | ❌ `Dropped: {failed_count}` | 📈 `Pass: {int((success_count/total_payloads)*100)}%`",
-            f"\n**__Accepted Asset Inventory Details:__**"
+            f"**__Mass Upload Processing Complete__**",
+            f"📊 `Total: {total_payloads}` | ✅ `Playable: {success_count}` | ❌ `Dropped/Deleted: {failed_count}` | 📈 `Pass Rate: {int((success_count/total_payloads)*100)}%`",
+            f"\n**__Verified Live Asset Inventory Details:__**"
         ]
         
         for idx, item in enumerate(accepted_assets_summary, 1):
@@ -387,7 +389,9 @@ async def massupload(
                 f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}` 🛠️ **Op:** `{item['op_id']}`"
             )
         
-        await interaction.channel.send("\n".join(summary_lines))
+        # Modify the original processing status update cleanly to reveal the finalized log structure
+        try: await status_msg.edit(content="\n".join(summary_lines))
+        except: await interaction.channel.send("\n".join(summary_lines))
 
 @bot.tree.command(name="method", description="Processes audio through complex phase loops")
 @app_commands.describe(audio_file="The source sound asset")
