@@ -261,76 +261,101 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
 
 # --- BOT COMMANDS ---
 
-@bot.tree.command(name="tts", description="Generates text-to-speech files from multiple engine configurations")
-@app_commands.describe(engine="The TTS layout choice style", text="Message string content to speak")
+@bot.tree.command(name="tts", description="Generates text-to-speech files using ttsmp3.com or Apple Say Daniel")
+@app_commands.describe(voice="The chosen voice option", text="Message text content to speak")
 async def tts_generation(
     interaction: discord.Interaction, 
-    engine: Literal["Apples Say (UK Daniel)", "ttsmp3 (Standard Male)", "ttsdemo (Fast Accent)", "ttstool (Digital Alternate)"], 
+    voice: Literal[
+        "Apple Say / Daniel (UK)",
+        "US English / Kimberly",
+        "US English / Ivy",
+        "US English / Kendra",
+        "US English / Justin",
+        "US English / Joey",
+        "US English / Matthew",
+        "US English / Salli",
+        "US English / Joanna",
+        "US Spanish / Penélope",
+        "US Spanish / Lupe",
+        "US Spanish / Miguel",
+        "Italian / Giorgio",
+        "Italian / Carla",
+        "Italian / Bianca"
+    ], 
     text: str
 ):
     await interaction.response.defer()
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Extracting audio vocal formats from target server payload...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Querying voice engine pipeline allocation...")
     uid = get_uid()
-    raw_mp3 = f"tts_raw_{uid}.mp3"
     final_ogg = f"tts_final_{uid}.ogg"
     
     try:
-        if engine == "Apples Say (UK Daniel)":
-            # Emulated macOS 'say' UK engine stream pipeline mapping
+        if voice == "Apple Say / Daniel (UK)":
+            # Direct endpoint mapping to fetch the classic UK Daniel profile asset track
             encoded_text = urllib.parse.quote(text)
-            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=en-uk&client=tw-ob&q={encoded_text}"
+            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=en-gb&client=tw-ob&q={encoded_text}"
             
             async with bot.session.get(api_url) as resp:
                 if resp.status == 200:
-                    with open(raw_mp3, "wb") as f:
-                        f.write(await resp.read())
-                    
-                    # Clean mastering adjustment loop for a clear desktop-style "say" response
-                    cmd = ['ffmpeg', '-y', '-i', raw_mp3, '-af', 'volume=2.0,aresample=44100', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
-                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    await proc.communicate()
+                    mp3_data = await resp.read()
+                    # Keep Daniel's native structure completely clear
+                    cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.6', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
+                    proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    await proc.communicate(input=mp3_data)
                 else:
-                    raise Exception(f"TTS Stream error code: {resp.status}")
-                    
+                    raise Exception(f"Daniel UK upstream error: HTTP {resp.status}")
         else:
-            # Standard engine processing loops (Scraped endpoint with unique engine effect wrappers)
-            encoded_text = urllib.parse.quote(text)
-            lang_param = "en-us" if "Standard" in engine else "en-au"
-            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl={lang_param}&client=tw-ob&q={encoded_text}"
+            # Internal mappings for the amazon polly engine layout
+            voice_mapping = {
+                "US English / Kimberly": "Kimberly", "US English / Ivy": "Ivy", 
+                "US English / Kendra": "Kendra", "US English / Justin": "Justin", 
+                "US English / Joey": "Joey", "US English / Matthew": "Matthew", 
+                "US English / Salli": "Salli", "US English / Joanna": "Joanna", 
+                "US Spanish / Penélope": "Penelope", "US Spanish / Lupe": "Lupe", 
+                "US Spanish / Miguel": "Miguel", "Italian / Giorgio": "Giorgio", 
+                "Italian / Carla": "Carla", "Italian / Bianca": "Bianca"
+            }
             
-            async with bot.session.get(api_url) as resp:
+            url = "https://ttsmp3.com/makemp3.php"
+            headers = {
+                "Origin": "https://ttsmp3.com",
+                "Referer": "https://ttsmp3.com/",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+            data = f"msg={urllib.parse.quote_plus(text)}&lang={voice_mapping[voice]}&source=ttsmp3"
+            
+            async with bot.session.post(url, data=data, headers=headers) as resp:
                 if resp.status == 200:
-                    with open(raw_mp3, "wb") as f:
-                        f.write(await resp.read())
-                    
-                    # Alter filters based on choice requirements
-                    if "Fast" in engine:
-                        filter_chain = 'atempo=1.28,volume=1.5'
-                    elif "Digital" in engine:
-                        filter_chain = 'asetrate=32000,aresample=44100,volume=1.8'
-                    else:
-                        filter_chain = 'volume=1.5'
+                    resp_json = await resp.json()
+                    if resp_json.get("Error") == 0:
+                        mp3_url = resp_json.get("URL")
                         
-                    cmd = ['ffmpeg', '-y', '-i', raw_mp3, '-af', filter_chain, '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
-                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    await proc.communicate()
+                        async with bot.session.get(mp3_url) as file_resp:
+                            if file_resp.status == 200:
+                                mp3_data = await file_resp.read()
+                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
+                                proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                await proc.communicate(input=mp3_data)
+                            else:
+                                raise Exception("Failed to fetch generated MP3 source bin link.")
+                    else:
+                        raise Exception(f"ttsmp3 API Error Flagged: {resp_json.get('Error')}")
                 else:
-                    raise Exception(f"TTS Cloud stream drop: {resp.status}")
+                    raise Exception(f"Connection state block: HTTP {resp.status}")
 
         if os.path.exists(final_ogg):
-            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Track layout (`{engine}`).")
+            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Layout (`{voice}`).")
             await interaction.followup.send(file=discord.File(final_ogg))
         else:
-            await status_msg.edit(content=f"{E_FAILED} Could not process synthesis layout.")
+            await status_msg.edit(content=f"{E_FAILED} Transformation structural frame failed.")
             
     except Exception as e:
-        await status_msg.edit(content=f"{E_FAILED} Engine extraction failed: {str(e)}")
+        await status_msg.edit(content=f"{E_FAILED} Synthesis request broken: {str(e)}")
         
     finally:
-        for path in [raw_mp3, final_ogg]:
-            if os.path.exists(path):
-                try: os.remove(path)
-                except: pass
+        if os.path.exists(final_ogg):
+            try: os.remove(final_ogg)
+            except: pass
 
 @bot.tree.command(name="emojiwhitelist", description="Manages permission whitelist for the emoji command")
 @app_commands.describe(action="Action to perform", user="The target discord user")
