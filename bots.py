@@ -11,7 +11,7 @@ from pedalboard import (
 from pedalboard.io import AudioFile
 from PIL import Image, ImageSequence
 from io import BytesIO
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 from flask import Flask
 from threading import Thread
 import urllib.parse
@@ -98,7 +98,7 @@ BAIT_MAP = {
     "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
 }
 
-# Comprehensive engine profile mappings
+# Master list profile mappings
 VOICE_MAP = {
     "US English / Kimberly": {"engine": "ttsmp3", "id": "Kimberly"},
     "US English / Ivy": {"engine": "ttsmp3", "id": "Ivy"},
@@ -297,28 +297,26 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
+# --- AUTOCOMPLETE LOGIC FOR RESTRICTED PARAMETERS ---
+async def voice_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    choices = [
+        app_commands.Choice(name=v_name, value=v_name)
+        for v_name in VOICE_MAP.keys()
+        if current.lower() in v_name.lower()
+    ]
+    return choices[:25] # Caps list at 25 items gracefully via typing query filter
+
 # --- BOT COMMANDS ---
 
 @bot.tree.command(name="tts", description="Generates multi-engine text-to-speech files seamlessly")
-@app_commands.describe(voice="The chosen unique voice across all platforms", text="Message text content to speak")
-async def tts_generation(
-    interaction: discord.Interaction, 
-    voice: Literal[
-        "US English / Kimberly", "US English / Ivy", "US English / Kendra", "US English / Justin",
-        "US English / Joey", "US English / Matthew", "US English / Salli", "US English / Joanna",
-        "US Spanish / Penélope", "US Spanish / Lupe", "US Spanish / Miguel", "Italian / Giorgio",
-        "Italian / Carla", "Italian / Bianca", "Daniel / Brian (UK English - Streamlabs)",
-        "Amy (UK English - Streamlabs)", "Emma (UK English - Streamlabs)", "Geraint (Welsh English - Streamlabs)",
-        "Russell (Australian English - Streamlabs)", "Nicole (Australian English - Streamlabs)",
-        "Raveena (Indian English - Streamlabs)", "Mathieu (French - Streamlabs)", "Celine (French - Streamlabs)",
-        "Hans (German - Streamlabs)", "Marlene (German - Streamlabs)", "Enrique (Spanish European - Streamlabs)",
-        "Conchita (Spanish European - Streamlabs)", "Mizuki (Japanese - Streamlabs)", "Takumi (Japanese - Streamlabs)",
-        "TikTok UK Male (Smooth British)", "TikTok US Female (Standard Narrator)", "TikTok US Male (Deep/Urban Voice)",
-        "TikTok US Male (Smooth/Calm)", "Mac Native Daniel (Offline / Apple Say)"
-    ], 
-    text: str
-):
+@app_commands.describe(voice="Type to search through all 34 premium voices available", text="Message text content to speak")
+@app_commands.autocomplete(voice=voice_autocomplete)
+async def tts_generation(interaction: discord.Interaction, voice: str, text: str):
     await interaction.response.defer()
+    
+    if voice not in VOICE_MAP:
+        return await interaction.followup.send(content=f"{E_FAILED} Invalid voice name selected. Please select a choice from the dynamic autocomplete list.")
+        
     status_msg = await interaction.followup.send(content=f"{E_LDING} Querying voice engine pipeline allocation...")
     uid = get_uid()
     final_output = f"tts_final_{uid}.ogg"
