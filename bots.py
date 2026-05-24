@@ -14,6 +14,7 @@ from io import BytesIO
 from typing import Literal, Optional
 from flask import Flask
 from threading import Thread
+import urllib.parse
 
 # --- AUTO-INSTALL DEPENDENCIES IF MISSING ---
 try:
@@ -215,7 +216,6 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                             op_url = f"https://apis.roblox.com/assets/v1/{operation_path}"
                             asset_id = None
                             
-                            # Increased checking cycles to make sure it runs until absolute conclusion (Playable or Deleted)
                             for _ in range(30): 
                                 await asyncio.sleep(2.0)
                                 async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
@@ -260,6 +260,77 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     return False
 
 # --- BOT COMMANDS ---
+
+@bot.tree.command(name="tts", description="Generates text-to-speech files from multiple engine configurations")
+@app_commands.describe(engine="The TTS layout choice style", text="Message string content to speak")
+async def tts_generation(
+    interaction: discord.Interaction, 
+    engine: Literal["Apples Say (UK Daniel)", "ttsmp3 (Standard Male)", "ttsdemo (Fast Accent)", "ttstool (Digital Alternate)"], 
+    text: str
+):
+    await interaction.response.defer()
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Extracting audio vocal formats from target server payload...")
+    uid = get_uid()
+    raw_mp3 = f"tts_raw_{uid}.mp3"
+    final_ogg = f"tts_final_{uid}.ogg"
+    
+    try:
+        if engine == "Apples Say (UK Daniel)":
+            # Emulated macOS 'say' UK engine stream pipeline mapping
+            encoded_text = urllib.parse.quote(text)
+            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=en-uk&client=tw-ob&q={encoded_text}"
+            
+            async with bot.session.get(api_url) as resp:
+                if resp.status == 200:
+                    with open(raw_mp3, "wb") as f:
+                        f.write(await resp.read())
+                    
+                    # Clean mastering adjustment loop for a clear desktop-style "say" response
+                    cmd = ['ffmpeg', '-y', '-i', raw_mp3, '-af', 'volume=2.0,aresample=44100', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
+                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    await proc.communicate()
+                else:
+                    raise Exception(f"TTS Stream error code: {resp.status}")
+                    
+        else:
+            # Standard engine processing loops (Scraped endpoint with unique engine effect wrappers)
+            encoded_text = urllib.parse.quote(text)
+            lang_param = "en-us" if "Standard" in engine else "en-au"
+            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl={lang_param}&client=tw-ob&q={encoded_text}"
+            
+            async with bot.session.get(api_url) as resp:
+                if resp.status == 200:
+                    with open(raw_mp3, "wb") as f:
+                        f.write(await resp.read())
+                    
+                    # Alter filters based on choice requirements
+                    if "Fast" in engine:
+                        filter_chain = 'atempo=1.28,volume=1.5'
+                    elif "Digital" in engine:
+                        filter_chain = 'asetrate=32000,aresample=44100,volume=1.8'
+                    else:
+                        filter_chain = 'volume=1.5'
+                        
+                    cmd = ['ffmpeg', '-y', '-i', raw_mp3, '-af', filter_chain, '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
+                    proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    await proc.communicate()
+                else:
+                    raise Exception(f"TTS Cloud stream drop: {resp.status}")
+
+        if os.path.exists(final_ogg):
+            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Track layout (`{engine}`).")
+            await interaction.followup.send(file=discord.File(final_ogg))
+        else:
+            await status_msg.edit(content=f"{E_FAILED} Could not process synthesis layout.")
+            
+    except Exception as e:
+        await status_msg.edit(content=f"{E_FAILED} Engine extraction failed: {str(e)}")
+        
+    finally:
+        for path in [raw_mp3, final_ogg]:
+            if os.path.exists(path):
+                try: os.remove(path)
+                except: pass
 
 @bot.tree.command(name="emojiwhitelist", description="Manages permission whitelist for the emoji command")
 @app_commands.describe(action="Action to perform", user="The target discord user")
@@ -372,7 +443,6 @@ async def massupload(
         upload_tasks.append(upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker))
         await asyncio.sleep(0.15)
         
-    # Wait until all backend loops have resolved either to Done or Error
     await asyncio.gather(*upload_tasks)
         
     if success_count == 0:
@@ -389,7 +459,6 @@ async def massupload(
                 f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}` 🛠️ **Op:** `{item['op_id']}`"
             )
         
-        # Modify the original processing status update cleanly to reveal the finalized log structure
         try: await status_msg.edit(content="\n".join(summary_lines))
         except: await interaction.channel.send("\n".join(summary_lines))
 
