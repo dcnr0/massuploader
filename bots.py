@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, gc, shutil
+import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, gc, shutil, base64
 from pydub import AudioSegment
 from pedalboard import (
     Pedalboard, Compressor, Gain, Limiter, LowShelfFilter, 
@@ -96,6 +96,44 @@ BAIT_MAP = {
     "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"},
     "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"},
     "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
+}
+
+# Comprehensive engine profile mappings
+VOICE_MAP = {
+    "US English / Kimberly": {"engine": "ttsmp3", "id": "Kimberly"},
+    "US English / Ivy": {"engine": "ttsmp3", "id": "Ivy"},
+    "US English / Kendra": {"engine": "ttsmp3", "id": "Kendra"},
+    "US English / Justin": {"engine": "ttsmp3", "id": "Justin"},
+    "US English / Joey": {"engine": "ttsmp3", "id": "Joey"},
+    "US English / Matthew": {"engine": "ttsmp3", "id": "Matthew"},
+    "US English / Salli": {"engine": "ttsmp3", "id": "Salli"},
+    "US English / Joanna": {"engine": "ttsmp3", "id": "Joanna"},
+    "US Spanish / Penélope": {"engine": "ttsmp3", "id": "Penelope"},
+    "US Spanish / Lupe": {"engine": "ttsmp3", "id": "Lupe"},
+    "US Spanish / Miguel": {"engine": "ttsmp3", "id": "Miguel"},
+    "Italian / Giorgio": {"engine": "ttsmp3", "id": "Giorgio"},
+    "Italian / Carla": {"engine": "ttsmp3", "id": "Carla"},
+    "Italian / Bianca": {"engine": "ttsmp3", "id": "Bianca"},
+    "Daniel / Brian (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Brian"},
+    "Amy (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Amy"},
+    "Emma (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Emma"},
+    "Geraint (Welsh English - Streamlabs)": {"engine": "streamlabs", "id": "Geraint"},
+    "Russell (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Russell"},
+    "Nicole (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Nicole"},
+    "Raveena (Indian English - Streamlabs)": {"engine": "streamlabs", "id": "Raveena"},
+    "Mathieu (French - Streamlabs)": {"engine": "streamlabs", "id": "Mathieu"},
+    "Celine (French - Streamlabs)": {"engine": "streamlabs", "id": "Celine"},
+    "Hans (German - Streamlabs)": {"engine": "streamlabs", "id": "Hans"},
+    "Marlene (German - Streamlabs)": {"engine": "streamlabs", "id": "Marlene"},
+    "Enrique (Spanish European - Streamlabs)": {"engine": "streamlabs", "id": "Enrique"},
+    "Conchita (Spanish European - Streamlabs)": {"engine": "streamlabs", "id": "Conchita"},
+    "Mizuki (Japanese - Streamlabs)": {"engine": "streamlabs", "id": "Mizuki"},
+    "Takumi (Japanese - Streamlabs)": {"engine": "streamlabs", "id": "Takumi"},
+    "TikTok UK Male (Smooth British)": {"engine": "tiktok", "id": "en_uk_001"},
+    "TikTok US Female (Standard Narrator)": {"engine": "tiktok", "id": "en_us_001"},
+    "TikTok US Male (Deep/Urban Voice)": {"engine": "tiktok", "id": "en_us_006"},
+    "TikTok US Male (Smooth/Calm)": {"engine": "tiktok", "id": "en_us_009"},
+    "Mac Native Daniel (Offline / Apple Say)": {"engine": "native", "id": "Daniel"}
 }
 
 class ZeptiV77(commands.Bot):
@@ -261,100 +299,103 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
 
 # --- BOT COMMANDS ---
 
-@bot.tree.command(name="tts", description="Generates text-to-speech files using ttsmp3.com or Apple Say Daniel")
-@app_commands.describe(voice="The chosen voice option", text="Message text content to speak")
+@bot.tree.command(name="tts", description="Generates multi-engine text-to-speech files seamlessly")
+@app_commands.describe(voice="The chosen unique voice across all platforms", text="Message text content to speak")
 async def tts_generation(
     interaction: discord.Interaction, 
     voice: Literal[
-        "Apple Say / Daniel (UK)",
-        "US English / Kimberly",
-        "US English / Ivy",
-        "US English / Kendra",
-        "US English / Justin",
-        "US English / Joey",
-        "US English / Matthew",
-        "US English / Salli",
-        "US English / Joanna",
-        "US Spanish / Penélope",
-        "US Spanish / Lupe",
-        "US Spanish / Miguel",
-        "Italian / Giorgio",
-        "Italian / Carla",
-        "Italian / Bianca"
+        "US English / Kimberly", "US English / Ivy", "US English / Kendra", "US English / Justin",
+        "US English / Joey", "US English / Matthew", "US English / Salli", "US English / Joanna",
+        "US Spanish / Penélope", "US Spanish / Lupe", "US Spanish / Miguel", "Italian / Giorgio",
+        "Italian / Carla", "Italian / Bianca", "Daniel / Brian (UK English - Streamlabs)",
+        "Amy (UK English - Streamlabs)", "Emma (UK English - Streamlabs)", "Geraint (Welsh English - Streamlabs)",
+        "Russell (Australian English - Streamlabs)", "Nicole (Australian English - Streamlabs)",
+        "Raveena (Indian English - Streamlabs)", "Mathieu (French - Streamlabs)", "Celine (French - Streamlabs)",
+        "Hans (German - Streamlabs)", "Marlene (German - Streamlabs)", "Enrique (Spanish European - Streamlabs)",
+        "Conchita (Spanish European - Streamlabs)", "Mizuki (Japanese - Streamlabs)", "Takumi (Japanese - Streamlabs)",
+        "TikTok UK Male (Smooth British)", "TikTok US Female (Standard Narrator)", "TikTok US Male (Deep/Urban Voice)",
+        "TikTok US Male (Smooth/Calm)", "Mac Native Daniel (Offline / Apple Say)"
     ], 
     text: str
 ):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Querying voice engine pipeline allocation...")
     uid = get_uid()
-    final_ogg = f"tts_final_{uid}.ogg"
+    final_output = f"tts_final_{uid}.ogg"
     
+    cfg = VOICE_MAP[voice]
+    engine = cfg["engine"]
+    voice_id = cfg["id"]
+    success = False
+
     try:
-        if voice == "Apple Say / Daniel (UK)":
-            # Direct endpoint mapping to fetch the classic UK Daniel profile asset track
-            encoded_text = urllib.parse.quote(text)
-            api_url = f"https://translate.google.com/translate_tts?ie=UTF-8&tl=en-gb&client=tw-ob&q={encoded_text}"
-            
-            async with bot.session.get(api_url) as resp:
-                if resp.status == 200:
-                    mp3_data = await resp.read()
-                    # Keep Daniel's native structure completely clear
-                    cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.6', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
-                    proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    await proc.communicate(input=mp3_data)
-                else:
-                    raise Exception(f"Daniel UK upstream error: HTTP {resp.status}")
-        else:
-            # Internal mappings for the amazon polly engine layout
-            voice_mapping = {
-                "US English / Kimberly": "Kimberly", "US English / Ivy": "Ivy", 
-                "US English / Kendra": "Kendra", "US English / Justin": "Justin", 
-                "US English / Joey": "Joey", "US English / Matthew": "Matthew", 
-                "US English / Salli": "Salli", "US English / Joanna": "Joanna", 
-                "US Spanish / Penélope": "Penelope", "US Spanish / Lupe": "Lupe", 
-                "US Spanish / Miguel": "Miguel", "Italian / Giorgio": "Giorgio", 
-                "Italian / Carla": "Carla", "Italian / Bianca": "Bianca"
-            }
-            
+        if engine == "ttsmp3":
             url = "https://ttsmp3.com/makemp3.php"
-            headers = {
-                "Origin": "https://ttsmp3.com",
-                "Referer": "https://ttsmp3.com/",
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-            data = f"msg={urllib.parse.quote_plus(text)}&lang={voice_mapping[voice]}&source=ttsmp3"
-            
+            headers = {"Origin": "https://ttsmp3.com", "Referer": "https://ttsmp3.com/", "Content-Type": "application/x-www-form-urlencoded"}
+            data = f"msg={urllib.parse.quote_plus(text)}&lang={voice_id}&source=ttsmp3"
             async with bot.session.post(url, data=data, headers=headers) as resp:
                 if resp.status == 200:
                     resp_json = await resp.json()
                     if resp_json.get("Error") == 0:
-                        mp3_url = resp_json.get("URL")
-                        
-                        async with bot.session.get(mp3_url) as file_resp:
+                        async with bot.session.get(resp_json.get("URL")) as file_resp:
                             if file_resp.status == 200:
-                                mp3_data = await file_resp.read()
-                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_ogg]
+                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
                                 proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                                await proc.communicate(input=mp3_data)
-                            else:
-                                raise Exception("Failed to fetch generated MP3 source bin link.")
-                    else:
-                        raise Exception(f"ttsmp3 API Error Flagged: {resp_json.get('Error')}")
-                else:
-                    raise Exception(f"Connection state block: HTTP {resp.status}")
+                                await proc.communicate(input=await file_resp.read())
+                                success = True
 
-        if os.path.exists(final_ogg):
-            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Layout (`{voice}`).")
-            await interaction.followup.send(file=discord.File(final_ogg))
+        elif engine == "streamlabs":
+            url = "https://streamlabs.com/api/v1.0/text-to-speech/voice"
+            payload = {"voice": voice_id, "text": text}
+            async with bot.session.post(url, data=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("success"):
+                        async with bot.session.get(data["speak_url"]) as file_resp:
+                            if file_resp.status == 200:
+                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                                proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                await proc.communicate(input=await file_resp.read())
+                                success = True
+
+        elif engine == "tiktok":
+            url = "https://tiktok-tts.api.cyberonix.org/v1/tts"
+            headers = {"Content-Type": "application/json"}
+            payload = {"voice": voice_id, "text": text}
+            async with bot.session.post(url, json=payload, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if "audio" in data:
+                        raw_bytes = base64.b64decode(data["audio"])
+                        cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                        proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        await proc.communicate(input=raw_bytes)
+                        success = True
+
+        elif engine == "native":
+            tmp_aiff = f"native_out_{uid}.aiff"
+            safe_text = text.replace('"', '\\"')
+            proc = await asyncio.create_subprocess_exec('say', '-v', voice_id, safe_text, '-o', tmp_aiff, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            await proc.communicate()
+            if os.path.exists(tmp_aiff):
+                cmd = ['ffmpeg', '-y', '-i', tmp_aiff, '-af', 'volume=1.6', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                await proc.communicate()
+                try: os.remove(tmp_aiff)
+                except: pass
+                success = True
+
+        if success and os.path.exists(final_output):
+            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Track (`{voice}`).")
+            await interaction.followup.send(file=discord.File(final_output))
         else:
-            await status_msg.edit(content=f"{E_FAILED} Transformation structural frame failed.")
+            await status_msg.edit(content=f"{E_FAILED} Synthesis frame generation failed.")
             
     except Exception as e:
-        await status_msg.edit(content=f"{E_FAILED} Synthesis request broken: {str(e)}")
-        
+        await status_msg.edit(content=f"{E_FAILED} Integration error processing: {str(e)}")
     finally:
-        if os.path.exists(final_ogg):
-            try: os.remove(final_ogg)
+        if os.path.exists(final_output):
+            try: os.remove(final_output)
             except: pass
 
 @bot.tree.command(name="emojiwhitelist", description="Manages permission whitelist for the emoji command")
@@ -531,16 +572,12 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
         try:
             tmp_spot_dir = f"spot_{uid}"
             os.makedirs(tmp_spot_dir, exist_ok=True)
-            
             cmd = ['spotdl', 'download', url, '--output', f"{tmp_spot_dir}/track.mp3"]
             proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            try:
-                await asyncio.wait_for(proc.communicate(), timeout=40)
+            try: await asyncio.wait_for(proc.communicate(), timeout=40)
             except asyncio.TimeoutError:
                 proc.kill()
                 raise asyncio.TimeoutError("Spotify extraction timed out.")
-
             expected_file = f"{tmp_spot_dir}/track.mp3"
             if os.path.exists(expected_file):
                 await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped Spotify track format.")
@@ -549,13 +586,10 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                 os.rmdir(tmp_spot_dir)
             else:
                 await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by spotdl search.")
-                if os.path.exists(tmp_spot_dir):
-                    shutil.rmtree(tmp_spot_dir)
+                if os.path.exists(tmp_spot_dir): shutil.rmtree(tmp_spot_dir)
         except Exception as e:
             await status_msg.edit(content=f"{E_FAILED} Failed SpotDL: {e}")
-            if os.path.exists(f"spot_{uid}"):
-                shutil.rmtree(f"spot_{uid}")
-            
+            if os.path.exists(f"spot_{uid}"): shutil.rmtree(f"spot_{uid}")
     else:
         template_path = f"m_{uid}"
         final_filename = f"m_{uid}.mp3"
@@ -563,37 +597,25 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
             async def run_with_timeout():
                 def dl():
                     ydl_opts = {
-                        'format': 'ba/w',
-                        'outtmpl': template_path,
-                        'postprocessors': [{
-                            'key': 'FFmpegExtractAudio',
-                            'preferredcodec': 'mp3',
-                            'preferredquality': '128',
-                        }],
+                        'format': 'ba/w', 'outtmpl': template_path,
+                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
                         'extractor_args': {'youtubetab': {'skip': ['authcheck']}},
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                        },
-                        'quiet': True,
-                        'no_warnings': True
+                        'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'},
+                        'quiet': True, 'no_warnings': True
                     }
                     cookie_file = os.path.join(BASE_DIR, "cookies.txt")
                     if os.path.exists(cookie_file): ydl_opts['cookiefile'] = cookie_file
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
                 await asyncio.get_event_loop().run_in_executor(None, dl)
-
             await asyncio.wait_for(run_with_timeout(), timeout=40)
-            
             if os.path.exists(final_filename):
                 await status_msg.edit(content=f"{E_SUCCESS} Downloaded and wrapped target track format.")
                 await interaction.followup.send(file=discord.File(final_filename))
                 os.remove(final_filename)
-            else: 
-                await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
+            else: await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
         except asyncio.TimeoutError:
-            await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP is currently restricted by platform provider.")
-        except Exception as e: 
-            await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
+            await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP restriction flagged.")
+        except Exception as e: await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
 @bot.tree.command(name="loudset", description="Alters audio using mastering presets")
 @app_commands.describe(audio_file="The sound asset to master")
