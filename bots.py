@@ -76,6 +76,7 @@ E_FAILED = "<a:failed:1506265787900579994>"
 ALLOWED_EMOJI_USERS = {1317324380291862659, 1495521117115256962}
 ADMIN_IDS = {1317324380291862659, 1495521117115256962}
 
+# --- UPDATED BAIT OPTIONS MAPPING ---
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -95,7 +96,17 @@ BAIT_MAP = {
     "16": {"files": ["lofi1.mp3", "lofi2.mp3"], "type": "sandwich"},
     "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"},
     "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"},
-    "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"}
+    "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"},
+    # New options added from assets screenshots
+    "20": {"files": ["01_part1.ogg", "01_part2.ogg"], "type": "sandwich"},
+    "21": {"files": ["02_part1.ogg", "02_part2.ogg"], "type": "sandwich"},
+    "22": {"files": ["03_part1.mp3", "03_part2.ogg"], "type": "sandwich"},
+    "23": {"files": ["baitpar1.ogg", "baitpar2.ogg"], "type": "sandwich"},
+    "24": {"files": ["bait-part1.mp3", "bait-part2.mp3"], "type": "sandwich"},
+    "25": {"files": ["z-part1.mp3", "z-part2.mp3"], "type": "sandwich"},
+    "26": {"files": ["anotherloudbait1.mp3", "anotherloudbait2.mp3"], "type": "sandwich"},
+    "27": {"files": ["aprilbait1.mp3", "aprilbait2.mp3"], "type": "sandwich"},
+    "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"}
 }
 
 # Master list profile mappings
@@ -304,7 +315,7 @@ async def voice_autocomplete(interaction: discord.Interaction, current: str) -> 
         for v_name in VOICE_MAP.keys()
         if current.lower() in v_name.lower()
     ]
-    return choices[:25] # Caps list at 25 items gracefully via typing query filter
+    return choices[:25]
 
 # --- BOT COMMANDS ---
 
@@ -713,7 +724,10 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 @app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
 async def bait(
     interaction: discord.Interaction, 
-    choice: Literal["1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19"], 
+    choice: Literal[
+        "1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19",
+        "20","21","22","23","24","25","26","27","28"
+    ], 
     audio_file: discord.Attachment
 ):
     try: await interaction.response.defer()
