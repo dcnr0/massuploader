@@ -76,7 +76,7 @@ E_FAILED = "<a:failed:1506265787900579994>"
 ALLOWED_EMOJI_USERS = {1317324380291862659, 1495521117115256962}
 ADMIN_IDS = {1317324380291862659, 1495521117115256962}
 
-# --- UPDATED BAIT OPTIONS MAPPING ---
+# --- BAIT OPTIONS MAPPING ---
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -97,7 +97,6 @@ BAIT_MAP = {
     "17": {"files": ["LOL1.mp3", "LOL2.mp3"], "type": "sandwich"},
     "18": {"files": ["acoolbaitHAHA1.mp3", "acoolbaitHAHA2.mp3"], "type": "sandwich"},
     "19": {"files": ["co-1.mp3", "co-2.mp3"], "type": "sandwich"},
-    # New options added from assets screenshots
     "20": {"files": ["01_part1.ogg", "01_part2.ogg"], "type": "sandwich"},
     "21": {"files": ["02_part1.ogg", "02_part2.ogg"], "type": "sandwich"},
     "22": {"files": ["03_part1.mp3", "03_part2.ogg"], "type": "sandwich"},
@@ -106,7 +105,11 @@ BAIT_MAP = {
     "25": {"files": ["z-part1.mp3", "z-part2.mp3"], "type": "sandwich"},
     "26": {"files": ["anotherloudbait1.mp3", "anotherloudbait2.mp3"], "type": "sandwich"},
     "27": {"files": ["aprilbait1.mp3", "aprilbait2.mp3"], "type": "sandwich"},
-    "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"}
+    "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"},
+    # Extra expansion configurations ("some else")
+    "29": {"files": ["aspart1.mp3", "aspart2.mp3"], "type": "sandwich"},
+    "30": {"files": ["extra1_part1.ogg", "extra1_part2.ogg"], "type": "sandwich"},
+    "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"}
 }
 
 # Master list profile mappings
@@ -308,13 +311,22 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
-# --- AUTOCOMPLETE LOGIC FOR RESTRICTED PARAMETERS ---
+# --- DYNAMIC AUTOCOMPLETE LOGIC FOR RESTRICTED PARAMETERS ---
 async def voice_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     choices = [
         app_commands.Choice(name=v_name, value=v_name)
         for v_name in VOICE_MAP.keys()
         if current.lower() in v_name.lower()
     ]
+    return choices[:25]
+
+async def bait_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+    choices = []
+    for key, val in BAIT_MAP.items():
+        # Display name shows template ID along with the first associated file layout
+        display_label = f"Template {key} ({val['files'][0]})"
+        if current.lower() in key.lower() or current.lower() in display_label.lower():
+            choices.append(app_commands.Choice(name=display_label, value=key))
     return choices[:25]
 
 # --- BOT COMMANDS ---
@@ -721,18 +733,16 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
-@app_commands.describe(choice="Template choice ID", audio_file="Main audio file")
-async def bait(
-    interaction: discord.Interaction, 
-    choice: Literal[
-        "1","2","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19",
-        "20","21","22","23","24","25","26","27","28"
-    ], 
-    audio_file: discord.Attachment
-):
+@app_commands.describe(choice="Type or select a template ID number", audio_file="Main audio file")
+@app_commands.autocomplete(choice=bait_autocomplete)
+async def bait(interaction: discord.Interaction, choice: str, audio_file: discord.Attachment):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
+    
+    if choice not in BAIT_MAP:
+        return await interaction.followup.send(content=f"{E_FAILED} Invalid selection. Choose a profile number from the dropdown matching your template options.")
+        
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Processing template sequence...")
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
     await audio_file.save(ip)
     cfg = BAIT_MAP[choice]
