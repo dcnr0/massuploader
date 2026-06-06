@@ -106,7 +106,6 @@ BAIT_MAP = {
     "26": {"files": ["anotherloudbait1.mp3", "anotherloudbait2.mp3"], "type": "sandwich"},
     "27": {"files": ["aprilbait1.mp3", "aprilbait2.mp3"], "type": "sandwich"},
     "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"},
-    # Extra expansion configurations ("some else")
     "29": {"files": ["aspart1.mp3", "aspart2.mp3"], "type": "sandwich"},
     "30": {"files": ["extra1_part1.ogg", "extra1_part2.ogg"], "type": "sandwich"},
     "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"}
@@ -311,7 +310,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
-# --- DYNAMIC AUTOCOMPLETE LOGIC FOR RESTRICTED PARAMETERS ---
+# --- DYNAMIC AUTOCOMPLETE LOGIC ---
 async def voice_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     choices = [
         app_commands.Choice(name=v_name, value=v_name)
@@ -323,10 +322,9 @@ async def voice_autocomplete(interaction: discord.Interaction, current: str) -> 
 async def bait_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     choices = []
     for key, val in BAIT_MAP.items():
-        # Display name shows template ID along with the first associated file layout
         display_label = f"Template {key} ({val['files'][0]})"
-        if current.lower() in key.lower() or current.lower() in display_label.lower():
-            choices.append(app_commands.Choice(name=display_label, value=key))
+        if not current or current.lower() in key.lower() or current.lower() in display_label.lower():
+            choices.append(app_commands.Choice(name=display_label, value=str(key)))
     return choices[:25]
 
 # --- BOT COMMANDS ---
@@ -739,13 +737,16 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     
-    if choice not in BAIT_MAP:
+    # Cast choice parameter to string directly to align with mapping dictionary formatting
+    clean_choice = str(choice).strip()
+    
+    if clean_choice not in BAIT_MAP:
         return await interaction.followup.send(content=f"{E_FAILED} Invalid selection. Choose a profile number from the dropdown matching your template options.")
         
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing template sequence...")
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
     await audio_file.save(ip)
-    cfg = BAIT_MAP[choice]
+    cfg = BAIT_MAP[clean_choice]
     def run_bait_mixing():
         main_track = AudioSegment.from_file(ip)
         bait1_path = find_file(cfg["files"][0])
