@@ -108,7 +108,9 @@ BAIT_MAP = {
     "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"},
     "29": {"files": ["aspart1.mp3", "aspart2.mp3"], "type": "sandwich"},
     "30": {"files": ["extra1_part1.ogg", "extra1_part2.ogg"], "type": "sandwich"},
-    "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"}
+    "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"},
+    "32": {"files": ["477s.mp3", "477s 2.mp3"], "type": "sandwich"},
+    "33": {"files": ["finally found it.mp3", "finally found it 2.mp3"], "type": "sandwich"}
 }
 
 # Master list profile mappings
@@ -132,7 +134,7 @@ VOICE_MAP = {
     "Emma (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Emma"},
     "Geraint (Welsh English - Streamlabs)": {"engine": "streamlabs", "id": "Geraint"},
     "Russell (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Russell"},
-    "Nicole (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Nicole"},
+    "Nicole (Australian English - Streamlabs)": {"engine": "Nicole", "id": "Nicole"},
     "Raveena (Indian English - Streamlabs)": {"engine": "streamlabs", "id": "Raveena"},
     "Mathieu (French - Streamlabs)": {"engine": "streamlabs", "id": "Mathieu"},
     "Celine (French - Streamlabs)": {"engine": "streamlabs", "id": "Celine"},
@@ -737,7 +739,6 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     
-    # Cast choice parameter to string directly to align with mapping dictionary formatting
     clean_choice = str(choice).strip()
     
     if clean_choice not in BAIT_MAP:
