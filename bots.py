@@ -134,7 +134,7 @@ VOICE_MAP = {
     "Emma (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Emma"},
     "Geraint (Welsh English - Streamlabs)": {"engine": "streamlabs", "id": "Geraint"},
     "Russell (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Russell"},
-    "Nicole (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Nicole"},
+    "Nicole (Australian English - Streamlabs)": {"engine": "Nicole", "id": "Nicole"},
     "Raveena (Indian English - Streamlabs)": {"engine": "streamlabs", "id": "Raveena"},
     "Mathieu (French - Streamlabs)": {"engine": "streamlabs", "id": "Mathieu"},
     "Celine (French - Streamlabs)": {"engine": "streamlabs", "id": "Celine"},
@@ -510,7 +510,7 @@ async def massupload(
             if success:
                 success_count += 1
                 line = f"<a:success:1506265759452631082> *{name}* uploaded successfully!"
-                accepted_assets_summary.append({"name": name, "asset_id": asset_id, "op_id": op_id})
+                accepted_assets_summary.append({"name": name, "asset_id": asset_id})
             else:
                 failed_count += 1
                 err_suffix = f" ({detail})" if detail else ""
@@ -543,7 +543,7 @@ async def massupload(
         
         for idx, item in enumerate(accepted_assets_summary, 1):
             summary_lines.append(
-                f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}` 🛠️ **Op:** `{item['op_id']}`"
+                f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}`"
             )
         
         try: await status_msg.edit(content="\n".join(summary_lines))
