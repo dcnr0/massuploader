@@ -134,7 +134,7 @@ VOICE_MAP = {
     "Emma (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Emma"},
     "Geraint (Welsh English - Streamlabs)": {"engine": "streamlabs", "id": "Geraint"},
     "Russell (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Russell"},
-    "Nicole (Australian English - Streamlabs)": {"engine": "Nicole", "id": "Nicole"},
+    "Nicole (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Nicole"},
     "Raveena (Indian English - Streamlabs)": {"engine": "streamlabs", "id": "Raveena"},
     "Mathieu (French - Streamlabs)": {"engine": "streamlabs", "id": "Mathieu"},
     "Celine (French - Streamlabs)": {"engine": "streamlabs", "id": "Celine"},
@@ -492,7 +492,7 @@ async def massupload(
         payloads.append((get_preset_title(style, idx, title), data))
             
     if not payloads:
-        await status_msg.edit(content=f"{E_FAILED} Audio variant transformations dropped or collapsed.")
+        await status_msg.edit(content="Audios failed to upload.")
         return
 
     creator_key = "groupId" if acc["isGroup"] else "userId"
@@ -509,7 +509,7 @@ async def massupload(
             processed_count += 1
             if success:
                 success_count += 1
-                line = f"<a:success:1506265759452631082> Fully Playable! [{name}]"
+                line = f"<a:success:1506265759452631082> *{name}* uploaded successfully!"
                 accepted_assets_summary.append({"name": name, "asset_id": asset_id, "op_id": op_id})
             else:
                 failed_count += 1
@@ -533,10 +533,10 @@ async def massupload(
     await asyncio.gather(*upload_tasks)
         
     if success_count == 0:
-        await status_msg.edit(content=f"{E_FAILED} All audio variations were removed or dropped by processing verification filters.")
+        await status_msg.edit(content="Audios failed to upload.")
     else:
         summary_lines = [
-            f"**__Mass Upload Processing Complete__**",
+            f"**All audios uploaded!**",
             f"📊 `Total: {total_payloads}` | ✅ `Playable: {success_count}` | ❌ `Dropped/Deleted: {failed_count}` | 📈 `Pass Rate: {int((success_count/total_payloads)*100)}%`",
             f"\n**__Verified Live Asset Inventory Details:__**"
         ]
