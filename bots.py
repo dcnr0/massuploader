@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, gc, shutil, base64
+import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, base64
 from pydub import AudioSegment
 from pedalboard import (
     Pedalboard, Compressor, Gain, Limiter, LowShelfFilter, 
@@ -9,8 +9,6 @@ from pedalboard import (
     PitchShift, Delay, NoiseGate, Bitcrush, Chorus, Phaser
 )
 from pedalboard.io import AudioFile
-from PIL import Image, ImageSequence
-from io import BytesIO
 from typing import Literal, Optional, List
 from flask import Flask
 from threading import Thread
@@ -113,7 +111,6 @@ BAIT_MAP = {
     "33": {"files": ["finally found it.mp3", "finally found it 2.mp3"], "type": "sandwich"}
 }
 
-# Master list profile mappings
 VOICE_MAP = {
     "US English / Kimberly": {"engine": "ttsmp3", "id": "Kimberly"},
     "US English / Ivy": {"engine": "ttsmp3", "id": "Ivy"},
@@ -204,42 +201,12 @@ def get_preset_title(style, index, custom_name):
     if style == "Numbers Only": return "".join(random.choice(nums) for _ in range(15))
     if style == "No Suffix (Clean)": return custom_name
     if style.startswith("withoutnumber-"): return style.replace("withoutnumber-", "")
-    return f"{custom_name}{index}"
-
-async def async_process_ffmpeg(ip, idx, batch_stutter, scramble_enabled):
-    u = get_uid()
-    op = f"v_out_{u}_{idx}.mp3"
-    warp = random.uniform(0.99, 1.01)
-    jitter = random.uniform(-5, 5)
-    target_rate = int(44100 * warp + jitter)
-    
-    cmd = [
-        'ffmpeg', '-y', '-i', ip,
-        '-af', f'asetrate={target_rate},aresample=44100,aloop=loop={idx}:size={int(batch_stutter * 44.1)}:start=0',
-        '-b:a', '192k', op
-    ]
-    
-    proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    await proc.communicate()
-    
-    if os.path.exists(op):
-        with open(op, 'rb') as f:
-            data = bytearray(f.read())
-        try: os.remove(op)
-        except: pass
-        
-        if scramble_enabled:
-            if len(data) > 2000:
-                for _ in range(4):
-                    pos = random.randint(500, len(data) - 500)
-                    data[pos:pos] = os.urandom(random.randint(4, 12))
-            data.extend(os.urandom(random.randint(64, 256)))
-        return bytes(data)
-    return None
+    return f"{custom_name}_{index}"
 
 async def upload_burst(session, data, name, api_key, target_id, creator_key, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
     current_delay = 0.5
+    op_id = "Unknown Op"
     
     for attempt in range(1, 10):
         form = aiohttp.FormData(quote_fields=False)
@@ -247,7 +214,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
             "assetType": "Audio", "displayName": name, "description": "zepti_W",
             "creationContext": {"creator": {creator_key: str(target_id)}}
         }), content_type='application/json')
-        form.add_field('fileContent', data, filename='audio.mp3', content_type='audio/mpeg')
+        form.add_field('fileContent', data, filename='v.mp3', content_type='audio/mpeg')
         
         try:
             async with session.post(url, data=form, headers={'x-api-key': api_key}, timeout=15) as r:
@@ -260,7 +227,6 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                     try:
                         parsed = json.loads(resp_text)
                         operation_path = parsed.get("path")
-                        op_id = "Unknown Op"
                         if operation_path:
                             match = re.search(r'operations/([a-fA-H0-9\-]+)', operation_path)
                             if match: op_id = match.group(1)
@@ -270,7 +236,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                             asset_id = None
                             
                             for _ in range(30): 
-                                await asyncio.sleep(2.0)
+                                await asyncio.sleep(1.5)
                                 async with session.get(op_url, headers={'x-api-key': api_key}) as op_r:
                                     if op_r.status == 200:
                                         op_parsed = json.loads(await op_r.text())
@@ -300,7 +266,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
                     return True
                 elif r.status == 429:
                     await asyncio.sleep(current_delay)
-                    current_delay = min(current_delay * 1.5, 5.0)
+                    current_delay = min(current_delay * 1.5, 4.0)
                 else:
                     try: err_msg = json.loads(resp_text).get("message", resp_text)
                     except: err_msg = resp_text
@@ -455,57 +421,50 @@ async def api_setup(interaction: discord.Interaction, key: str, target_id: str, 
     AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to Destination ID: **{target_id}**.", ephemeral=True)
 
-@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies concurrently to Roblox")
-@app_commands.describe(audio_file="Sound asset to upload", title="Display name prefix", style="Randomizer style pattern", scramble="Enable binary scrambling")
+@bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies concurrently to Roblox using byte-stutter processing")
+@app_commands.describe(audio_file="Sound asset to upload", title="Display name prefix", style="Randomizer style pattern")
 async def massupload(
     interaction: discord.Interaction, 
     audio_file: discord.Attachment, 
     title: str, 
-    style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default",
-    scramble: bool = True
+    style: Literal["Default", "Chaos (Symbols/Letters)", "Emoji Heavy", "Uppercase & Lowercase", "Numbers Only", "No Suffix (Clean)"] = "Default"
 ):
     if interaction.user.id not in AUTH_DATA: return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
         
-    status_msg = await interaction.followup.send(content=f"{E_LDING} Writing temporary source audio configurations...")
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Reading raw file data into internal memory...")
     acc = AUTH_DATA[interaction.user.id]
     
-    u_init = get_uid()
-    tmp_input = f"raw_in_{u_init}.mp3"
-    await audio_file.save(tmp_input)
-
-    batch_stutter = random.randint(40, 220)
-    await status_msg.edit(content=f"{E_LDING} Building variation array streams safely...")
-    
-    prepared_payload_data = []
-    for idx in range(1, 11):
-        variant = await async_process_ffmpeg(tmp_input, idx, batch_stutter, scramble)
-        if variant:
-            prepared_payload_data.append(variant)
-    
-    try: os.remove(tmp_input)
-    except: pass
-
-    payloads = []
-    for idx, data in enumerate(prepared_payload_data, 1):
-        payloads.append((get_preset_title(style, idx, title), data))
-            
-    if not payloads:
-        await status_msg.edit(content="Audios failed to upload.")
-        return
-
+    # Read the audio file directly into memory bytes
+    raw_data = await audio_file.read()
     creator_key = "groupId" if acc["isGroup"] else "userId"
+
+    await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
+    
+    # Build payload arrays instantly using the updated byte-stuttering logic from popup.js backend
+    payloads = []
+    for idx in range(1, 11):
+        num_repeats = max(0, idx - 1)
+        if num_repeats > 0:
+            header_stutter = raw_data[:2500] * num_repeats
+            processed_data = header_stutter + raw_data
+        else:
+            processed_data = raw_data
+            
+        variant_name = get_preset_title(style, idx, title)
+        payloads.append((variant_name, processed_data))
+
     total_payloads = len(payloads)
     processed_count = success_count = failed_count = 0
     status_lines = []
     accepted_assets_summary = []
-    lock = asyncio.Lock()
+    ui_lock = asyncio.Lock()
     last_ui_update = 0
     
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
         nonlocal processed_count, success_count, failed_count, last_ui_update
-        async with lock:
+        async with ui_lock:
             processed_count += 1
             if success:
                 success_count += 1
@@ -518,25 +477,37 @@ async def massupload(
                 
             status_lines.append(line)
             now = datetime.datetime.now().timestamp()
-            if (now - last_ui_update > 2.0) or (processed_count == total_payloads):
+            # Fast UI updates every 1.5 seconds maximum to bypass discord rate limits
+            if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
                 last_ui_update = now
-                try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines))
+                try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
                 except: pass
 
-    await status_msg.edit(content=f"{E_LDING} Running processing pipeline until all variations settle (Playable or Blocked)...")
+    await status_msg.edit(content=f"{E_LDING} Opening concurrent network streaming allocation queue...")
     
-    upload_tasks = []
-    for d_name, data in payloads:
-        upload_tasks.append(upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker))
-        await asyncio.sleep(0.15)
+    # Run the concurrent queue pool to deliver payloads instantly
+    queue = asyncio.Queue()
+    for item in payloads:
+        queue.put_nowait(item)
         
-    await asyncio.gather(*upload_tasks)
+    async def worker():
+        while not queue.empty():
+            try:
+                d_name, data = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
+            queue.task_done()
+
+    # Allocate up to 5 parallel asynchronous connection pipelines simultaneously
+    workers = [asyncio.create_task(worker()) for _ in range(min(5, total_payloads))]
+    await asyncio.gather(*workers)
         
     if success_count == 0:
-        await status_msg.edit(content="Audios failed to upload.")
+        await status_msg.edit(content="Audios failed to upload completely.")
     else:
         summary_lines = [
-            f"**All audios uploaded!**",
+            f"**All audios uploaded via fast byte-processing!**",
             f"📊 `Total: {total_payloads}` | ✅ `Playable: {success_count}` | ❌ `Dropped/Deleted: {failed_count}` | 📈 `Pass Rate: {int((success_count/total_payloads)*100)}%`",
             f"\n**__Verified Live Asset Inventory Details:__**"
         ]
@@ -589,7 +560,7 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     status_msg = await interaction.followup.send(content=f"{E_LDING} Stream scraping audio streams (Optimized)...")
     uid = get_uid()
     
-    if "spotify.com" in url.lower():
+    if "spotify.com" in url.lower() or "spotify.com" in url.lower():
         try:
             tmp_spot_dir = f"spot_{uid}"
             os.makedirs(tmp_spot_dir, exist_ok=True)
