@@ -211,7 +211,9 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     for attempt in range(1, 10):
         form = aiohttp.FormData(quote_fields=False)
         form.add_field('request', json.dumps({
-            "assetType": "Audio", "displayName": name, "description": "zepti_W",
+            "assetType": "Audio", 
+            "displayName": name, 
+            "description": "zepti_W",
             "creationContext": {"creator": {creator_key: str(target_id)}}
         }), content_type='application/json')
         form.add_field('fileContent', data, filename='v.mp3', content_type='audio/mpeg')
@@ -436,13 +438,11 @@ async def massupload(
     status_msg = await interaction.followup.send(content=f"{E_LDING} Reading raw file data into internal memory...")
     acc = AUTH_DATA[interaction.user.id]
     
-    # Read the audio file directly into memory bytes
     raw_data = await audio_file.read()
     creator_key = "groupId" if acc["isGroup"] else "userId"
 
     await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
     
-    # Build payload arrays instantly using the updated byte-stuttering logic from popup.js backend
     payloads = []
     for idx in range(1, 11):
         num_repeats = max(0, idx - 1)
@@ -477,7 +477,6 @@ async def massupload(
                 
             status_lines.append(line)
             now = datetime.datetime.now().timestamp()
-            # Fast UI updates every 1.5 seconds maximum to bypass discord rate limits
             if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
                 last_ui_update = now
                 try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
@@ -485,7 +484,6 @@ async def massupload(
 
     await status_msg.edit(content=f"{E_LDING} Opening concurrent network streaming allocation queue...")
     
-    # Run the concurrent queue pool to deliver payloads instantly
     queue = asyncio.Queue()
     for item in payloads:
         queue.put_nowait(item)
@@ -499,7 +497,6 @@ async def massupload(
             await upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
             queue.task_done()
 
-    # Allocate up to 5 parallel asynchronous connection pipelines simultaneously
     workers = [asyncio.create_task(worker()) for _ in range(min(5, total_payloads))]
     await asyncio.gather(*workers)
         
