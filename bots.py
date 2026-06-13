@@ -342,7 +342,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     user_data = COOKIE_STORE[interaction.user.id]
     cookie = user_data["cookie"]
     
-    # Parse space-separated list of IDs out cleanly
+    # Parse space-separated list of IDs cleanly
     target_ids = [int(x) for x in re.findall(r'\d+', ids_string)]
     if not target_ids:
         return await status_msg.edit(content=f"{E_FAILED} No valid asset configuration tracking IDs discovered in string payload parameter.")
@@ -358,38 +358,104 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     ui_lock = asyncio.Lock()
     last_ui_update = 0
 
-    semaphore = asyncio.Semaphore(15) # Concurrent pipeline rate tracking throttle restriction
+    semaphore = asyncio.Semaphore(5) # Lowered slightly to safely handle the dual lookup + patch pipeline
 
     async def patch_worker(asset_id: int):
         nonlocal processed_count, success_count, failed_count, last_ui_update, csrf_token
-        url = f"https://develop.roblox.com/v1/assets/{asset_id}"
+        
+        base_headers = {
+            "Cookie": f".ROBLOSECURITY={cookie}",
+            "X-CSRF-Token": csrf_token,
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
         
         async with semaphore:
+            # PHASE 1: Asset Detection & Ownership/Deletion Validation
+            details_url = f"https://economy.roblox.com/v2/assets/{asset_id}/details"
+            is_group = False
+            target_group_id = None
+            
+            try:
+                async with bot.session.get(details_url, headers=base_headers, timeout=10) as detail_res:
+                    if detail_res.status == 404:
+                        async with ui_lock:
+                            failed_count += 1
+                            status_lines.append(f"🗑️ Invalid/Deleted ID `{asset_id}`: Does not exist.")
+                        processed_count += 1
+                        return
+                    elif detail_res.status == 200:
+                        data = await detail_res.json()
+                        
+                        # Detect Content Deletion
+                        if data.get("IsArchived") is False and data.get("Description") == "[Content Deleted]":
+                            async with ui_lock:
+                                failed_count += 1
+                                status_lines.append(f"❌ Deleted ID `{asset_id}`: Content permanently moderated.")
+                            processed_count += 1
+                            return
+
+                        # Detect Group Ownership vs User Ownership
+                        creator = data.get("Creator", {})
+                        if creator.get("CreatorType") == "Group":
+                            is_group = True
+                            target_group_id = creator.get("CreatorTargetId")
+            except Exception as e:
+                pass
+
+            # PHASE 2: Unarchiving Execution
+            url = f"https://itemconfiguration.roblox.com/v1/assets/{asset_id}/update"
+            
             for attempt in range(3):
-                headers = {
-                    "Cookie": f".ROBLOSECURITY={cookie}",
-                    "X-CSRF-Token": csrf_token,
-                    "Content-Type": "application/json"
-                }
+                headers = base_headers.copy()
+                headers["X-CSRF-Token"] = csrf_token
+                
+                if is_group and target_group_id:
+                    headers["Referer"] = f"https://create.roblox.com/dashboard/creations/groups/{target_group_id}/marketplace/{asset_id}/configure"
+                else:
+                    headers["Referer"] = f"https://create.roblox.com/dashboard/creations/marketplace/{asset_id}/configure"
+                
+                payload = {"isArchived": False}
+                
                 try:
-                    async with bot.session.patch(url, json={"IsArchived": False}, headers=headers, timeout=12) as r:
-                        # Handle unexpected mid-execution CSRF token rotation issues automatically
-                        if r.status == 403 and "X-CSRF-Token" in r.headers:
-                            csrf_token = r.headers.get("X-CSRF-Token")
-                            continue
+                    async with bot.session.post(url, json=payload, headers=headers, timeout=12) as r:
+                        if r.status == 403:
+                            if "X-CSRF-Token" in r.headers:
+                                csrf_token = r.headers.get("X-CSRF-Token")
+                                continue
                             
+                            # Detect missing Group/Asset permissions
+                            try:
+                                json_data = await r.json()
+                                if "errors" in json_data:
+                                    msg = json_data['errors'][0].get('message', '').lower()
+                                    if "permission" in msg or "unauthorized" in msg:
+                                        async with ui_lock:
+                                            failed_count += 1
+                                            status_lines.append(f"🔒 No Permission `{asset_id}`: Not in group/Not owner.")
+                                        break
+                            except:
+                                pass
+                                
                         if r.status == 200:
                             async with ui_lock:
                                 success_count += 1
                                 status_lines.append(f"<a:success:1506265759452631082> Unarchived Asset ID: `{asset_id}`")
                             break
                         elif r.status == 429:
-                            await asyncio.sleep(2.0 * (attempt + 1))
+                            await asyncio.sleep(2.5 * (attempt + 1))
                             continue
                         else:
+                            resp_err = ""
+                            try:
+                                json_data = await r.json()
+                                if "errors" in json_data:
+                                    resp_err = f" - {json_data['errors'][0].get('message')}"
+                            except:
+                                pass
                             async with ui_lock:
                                 failed_count += 1
-                                status_lines.append(f"<a:failed:1506265787900579994> Failed ID `{asset_id}`: HTTP {r.status}")
+                                status_lines.append(f"<a:failed:1506265787900579994> Failed ID `{asset_id}`: HTTP {r.status}{resp_err}")
                             break
                 except Exception as e:
                     if attempt == 2:
@@ -404,7 +470,8 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                 if (now - last_ui_update > 1.5) or (processed_count == total_tasks):
                     last_ui_update = now
                     try:
-                        await status_msg.edit(content=f"**Restoring DaPumpkinGod Archived Array Elements:** ({processed_count}/{total_tasks})\n" + "\n".join(status_lines[-6:]))
+                        # Updated this string directly to "Restoring Audios.."
+                        await status_msg.edit(content=f"**Restoring Audios..** ({processed_count}/{total_tasks})\n" + "\n".join(status_lines[-6:]))
                     except:
                         pass
 
@@ -412,7 +479,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     tasks = [asyncio.create_task(patch_worker(aid)) for aid in target_ids]
     await asyncio.gather(*tasks)
 
-    # Output terminal breakdown presentation wrapper
+    # Output breakdown presentation wrapper
     summary_msg = [
         f"🏆 **Asset Unarchive Operations Completed!**",
         f"👤 Account User context: **{user_data['username']}**",
@@ -422,7 +489,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
         await status_msg.edit(content="\n".join(summary_msg))
     except:
         await interaction.channel.send("\n".join(summary_msg))
-
+        
 @bot.tree.command(name="tts", description="Generates multi-engine text-to-speech files seamlessly")
 @app_commands.describe(voice="Type to search through all 34 premium voices available", text="Message text content to speak")
 @app_commands.autocomplete(voice=voice_autocomplete)
