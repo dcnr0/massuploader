@@ -61,8 +61,7 @@ if os.path.exists(FFMPEG_BIN):
 else:
     AudioSegment.converter = "ffmpeg"
 
-AUTH_DATA = {} 
-COOKIE_STORE = {} # Format: { user_id: { "cookie": str, "username": str } }
+AUTH_DATA = {}
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲⚠️⚡🔥")
 
 E_MOD = "<a:mod:1506265969562226738>"
@@ -303,38 +302,11 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
 
 # --- BOT COMMANDS ---
 
-@bot.tree.command(name="cookie", description="Links your .ROBLOSECURITY account cookie securely to verify your profile username")
-@app_commands.describe(cookie_string="Your complete .ROBLOSECURITY token cookie block")
-async def link_user_cookie(interaction: discord.Interaction, cookie_string: str):
-    await interaction.response.defer(ephemeral=True)
-    
-    # Clean up standard formatting prefixes if pasted directly from tracking consoles
-    clean_cookie = cookie_string.strip()
-    if ".ROBLOSECURITY=" in clean_cookie:
-        clean_cookie = clean_cookie.split(".ROBLOSECURITY=")[-1].split(";")[0].strip()
-
-    headers = {"Cookie": f".ROBLOSECURITY={clean_cookie}"}
-    try:
-        async with bot.session.get("https://users.roblox.com/v1/users/authenticated", headers=headers) as r:
-            if r.status == 200:
-                user_data = await r.json()
-                username = user_data.get("name", "Unknown User")
-                
-                COOKIE_STORE[interaction.user.id] = {
-                    "cookie": clean_cookie,
-                    "username": username
-                }
-                await interaction.followup.send(content=f"{E_SUCCESS} Verified Account Authentication! Linked to Roblox Username: **{username}**", ephemeral=True)
-            else:
-                await interaction.followup.send(content=f"{E_FAILED} Cookie Authentication rejected by Roblox. Please check if your token is expired or copied completely.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(content=f"{E_FAILED} Validation Error: {str(e)}", ephemeral=True)
-
 @bot.tree.command(name="unarchive", description="To unarchive any audios that was archived by DaPumpkinGod.")
 @app_commands.describe(ids_string="Space separated asset IDs to batch unarchive (e.g. 1102 1103 1104)")
 async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
-    if interaction.user.id not in COOKIE_STORE:
-        return await interaction.response.send_message(content=f"{E_FAILED} Account cookie not found. Please use the `/cookie` configuration command first.", ephemeral=True)
+    if interaction.user.id not in AUTH_DATA:
+        return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
 
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Parsing targeting sequence indexes...")
@@ -599,7 +571,7 @@ async def create_server_emoji(interaction: discord.Interaction, name: str, file:
 @app_commands.describe(key="Roblox Asset API Key", target_id="User or Group ID destination", is_group="Is group ID")
 async def api_setup(interaction: discord.Interaction, key: str, target_id: str, is_group: bool):
     await interaction.response.defer(ephemeral=True)
-    AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group}
+    AUTH_DATA[interaction.user.id] = {"apikey": key, "targetId": str(target_id), "isGroup": is_group, "creatorKey": "groupId" if is_group else "userId"}
     await interaction.followup.send(content=f"{E_SUCCESS} Linked to Destination ID: **{target_id}**.", ephemeral=True)
 
 @bot.tree.command(name="massupload", description="Modifies and batch uploads 10 copies concurrently to Roblox using byte-stutter processing")
