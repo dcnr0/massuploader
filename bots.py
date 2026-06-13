@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, base64
+import os, asyncio, aiohttp, datetime, subprocess, random, string, io, json, re, base64, sys
 from pydub import AudioSegment
 from pedalboard import (
     Pedalboard, Compressor, Gain, Limiter, LowShelfFilter, 
@@ -18,14 +18,12 @@ import urllib.parse
 try:
     import yt_dlp
 except ImportError:
-    import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
     import yt_dlp
 
 try:
     import spotdl
 except ImportError:
-    import sys
     subprocess.check_call([sys.executable, "-m", "pip", "install", "spotdl"])
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
@@ -64,6 +62,7 @@ else:
     AudioSegment.converter = "ffmpeg"
 
 AUTH_DATA = {} 
+COOKIE_STORE = {} # Format: { user_id: { "cookie": str, "username": str } }
 EMOJI_POOL = list("😀😃😄😁😆😅😂🤣☺️😇🙂🙃😉😍😘😗😙😋😛😝😜🤪🤨🧐🤓😎🤩😏😒😞😔😟😕🙁☹️😣😖😫😩😢😭😤😠😡🤬🤯😳😱😨😰😥😓🤗🤔🤭🤫🤥😶😐😑😬🙄😯😦😧😮😲⚠️⚡🔥")
 
 E_MOD = "<a:mod:1506265969562226738>"
@@ -74,7 +73,6 @@ E_FAILED = "<a:failed:1506265787900579994>"
 ALLOWED_EMOJI_USERS = {1317324380291862659, 1495521117115256962}
 ADMIN_IDS = {1317324380291862659, 1495521117115256962}
 
-# --- BAIT OPTIONS MAPPING ---
 BAIT_MAP = {
     "1": {"files": ["uno.mp3", "dos.mp3"], "type": "sandwich"},
     "2": {"files": ["baitupd.mp3"], "type": "start"},
@@ -201,9 +199,13 @@ def get_preset_title(style, index, custom_name):
     if style == "Numbers Only": return "".join(random.choice(nums) for _ in range(15))
     if style == "No Suffix (Clean)": return custom_name
     if style.startswith("withoutnumber-"): return style.replace("withoutnumber-", "")
-    
-    # Matches your updated naming style pattern seamlessly
     return f"{custom_name}{index}"
+
+async def fetch_csrf_token(session, cookie: str) -> Optional[str]:
+    """Obtains a fresh X-CSRF-Token dynamically from Roblox auth pipeline."""
+    headers = {"Cookie": f".ROBLOSECURITY={cookie}"}
+    async with session.post("https://auth.roblox.com/v2/login", headers=headers) as r:
+        return r.headers.get("X-CSRF-Token")
 
 async def upload_burst(session, data, name, api_key, target_id, creator_key, live_status_callback):
     url = "https://apis.roblox.com/assets/v1/assets"
@@ -282,7 +284,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
-# --- DYNAMIC AUTOCOMPLETE LOGIC ---
+# --- AUTOCOMPLETE LOGIC ---
 async def voice_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     choices = [
         app_commands.Choice(name=v_name, value=v_name)
@@ -301,24 +303,140 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
 
 # --- BOT COMMANDS ---
 
+@bot.tree.command(name="cookie", description="Links your .ROBLOSECURITY account cookie securely to verify your profile username")
+@app_commands.describe(cookie_string="Your complete .ROBLOSECURITY token cookie block")
+async def link_user_cookie(interaction: discord.Interaction, cookie_string: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    # Clean up standard formatting prefixes if pasted directly from tracking consoles
+    clean_cookie = cookie_string.strip()
+    if ".ROBLOSECURITY=" in clean_cookie:
+        clean_cookie = clean_cookie.split(".ROBLOSECURITY=")[-1].split(";")[0].strip()
+
+    headers = {"Cookie": f".ROBLOSECURITY={clean_cookie}"}
+    try:
+        async with bot.session.get("https://users.roblox.com/v1/users/authenticated", headers=headers) as r:
+            if r.status == 200:
+                user_data = await r.json()
+                username = user_data.get("name", "Unknown User")
+                
+                COOKIE_STORE[interaction.user.id] = {
+                    "cookie": clean_cookie,
+                    "username": username
+                }
+                await interaction.followup.send(content=f"{E_SUCCESS} Verified Account Authentication! Linked to Roblox Username: **{username}**", ephemeral=True)
+            else:
+                await interaction.followup.send(content=f"{E_FAILED} Cookie Authentication rejected by Roblox. Please check if your token is expired or copied completely.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(content=f"{E_FAILED} Validation Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="unarchive", description="To unarchive any audios that was archived by DaPumpkinGod.")
+@app_commands.describe(ids_string="Space separated asset IDs to batch unarchive (e.g. 1102 1103 1104)")
+async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
+    if interaction.user.id not in COOKIE_STORE:
+        return await interaction.response.send_message(content=f"{E_FAILED} Account cookie not found. Please use the `/cookie` configuration command first.", ephemeral=True)
+
+    await interaction.response.defer()
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Parsing targeting sequence indexes...")
+
+    user_data = COOKIE_STORE[interaction.user.id]
+    cookie = user_data["cookie"]
+    
+    # Parse space-separated list of IDs out cleanly
+    target_ids = [int(x) for x in re.findall(r'\d+', ids_string)]
+    if not target_ids:
+        return await status_msg.edit(content=f"{E_FAILED} No valid asset configuration tracking IDs discovered in string payload parameter.")
+
+    await status_msg.edit(content=f"{E_LDING} Querying fresh CSRF pipeline authorization token wrapper...")
+    csrf_token = await fetch_csrf_token(bot.session, cookie)
+    if not csrf_token:
+        return await status_msg.edit(content=f"{E_FAILED} Operation terminated. Unable to claim target token container loop securely.")
+
+    total_tasks = len(target_ids)
+    processed_count = success_count = failed_count = 0
+    status_lines = []
+    ui_lock = asyncio.Lock()
+    last_ui_update = 0
+
+    semaphore = asyncio.Semaphore(15) # Concurrent pipeline rate tracking throttle restriction
+
+    async def patch_worker(asset_id: int):
+        nonlocal processed_count, success_count, failed_count, last_ui_update, csrf_token
+        url = f"https://develop.roblox.com/v1/assets/{asset_id}"
+        
+        async with semaphore:
+            for attempt in range(3):
+                headers = {
+                    "Cookie": f".ROBLOSECURITY={cookie}",
+                    "X-CSRF-Token": csrf_token,
+                    "Content-Type": "application/json"
+                }
+                try:
+                    async with bot.session.patch(url, json={"IsArchived": False}, headers=headers, timeout=12) as r:
+                        # Handle unexpected mid-execution CSRF token rotation issues automatically
+                        if r.status == 403 and "X-CSRF-Token" in r.headers:
+                            csrf_token = r.headers.get("X-CSRF-Token")
+                            continue
+                            
+                        if r.status == 200:
+                            async with ui_lock:
+                                success_count += 1
+                                status_lines.append(f"<a:success:1506265759452631082> Unarchived Asset ID: `{asset_id}`")
+                            break
+                        elif r.status == 429:
+                            await asyncio.sleep(2.0 * (attempt + 1))
+                            continue
+                        else:
+                            async with ui_lock:
+                                failed_count += 1
+                                status_lines.append(f"<a:failed:1506265787900579994> Failed ID `{asset_id}`: HTTP {r.status}")
+                            break
+                except Exception as e:
+                    if attempt == 2:
+                        async with ui_lock:
+                            failed_count += 1
+                            status_lines.append(f"<a:failed:1506265787900579994> Error ID `{asset_id}`: {str(e)}")
+                    await asyncio.sleep(1.0)
+            
+            async with ui_lock:
+                processed_count += 1
+                now = datetime.datetime.now().timestamp()
+                if (now - last_ui_update > 1.5) or (processed_count == total_tasks):
+                    last_ui_update = now
+                    try:
+                        await status_msg.edit(content=f"**Restoring DaPumpkinGod Archived Array Elements:** ({processed_count}/{total_tasks})\n" + "\n".join(status_lines[-6:]))
+                    except:
+                        pass
+
+    # Batch running concurrent worker threads asynchronously
+    tasks = [asyncio.create_task(patch_worker(aid)) for aid in target_ids]
+    await asyncio.gather(*tasks)
+
+    # Output terminal breakdown presentation wrapper
+    summary_msg = [
+        f"🏆 **Asset Unarchive Operations Completed!**",
+        f"👤 Account User context: **{user_data['username']}**",
+        f"📊 `Total Targeted: {total_tasks}` | ✅ `Unarchived: {success_count}` | ❌ `Failed: {failed_count}` | 📈 `Success Rate: {int((success_count/total_tasks)*100) if total_tasks > 0 else 0}%`"
+    ]
+    try:
+        await status_msg.edit(content="\n".join(summary_msg))
+    except:
+        await interaction.channel.send("\n".join(summary_msg))
+
 @bot.tree.command(name="tts", description="Generates multi-engine text-to-speech files seamlessly")
 @app_commands.describe(voice="Type to search through all 34 premium voices available", text="Message text content to speak")
 @app_commands.autocomplete(voice=voice_autocomplete)
 async def tts_generation(interaction: discord.Interaction, voice: str, text: str):
     await interaction.response.defer()
-    
     if voice not in VOICE_MAP:
         return await interaction.followup.send(content=f"{E_FAILED} Invalid voice name selected. Please select a choice from the dynamic autocomplete list.")
-        
     status_msg = await interaction.followup.send(content=f"{E_LDING} Querying voice engine pipeline allocation...")
     uid = get_uid()
     final_output = f"tts_final_{uid}.ogg"
-    
     cfg = VOICE_MAP[voice]
     engine = cfg["engine"]
     voice_id = cfg["id"]
     success = False
-
     try:
         if engine == "ttsmp3":
             url = "https://ttsmp3.com/makemp3.php"
@@ -334,7 +452,6 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                                 proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 await proc.communicate(input=await file_resp.read())
                                 success = True
-
         elif engine == "streamlabs":
             url = "https://streamlabs.com/api/v1.0/text-to-speech/voice"
             payload = {"voice": voice_id, "text": text}
@@ -348,7 +465,6 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                                 proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 await proc.communicate(input=await file_resp.read())
                                 success = True
-
         elif engine == "tiktok":
             url = "https://tiktok-tts.api.cyberonix.org/v1/tts"
             headers = {"Content-Type": "application/json"}
@@ -362,7 +478,6 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                         proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         await proc.communicate(input=raw_bytes)
                         success = True
-
         elif engine == "native":
             tmp_aiff = f"native_out_{uid}.aiff"
             safe_text = text.replace('"', '\\"')
@@ -375,15 +490,11 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                 try: os.remove(tmp_aiff)
                 except: pass
                 success = True
-
         if success and os.path.exists(final_output):
             await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Track (`{voice}`).")
             await interaction.followup.send(file=discord.File(final_output))
-        else:
-            await status_msg.edit(content=f"{E_FAILED} Synthesis frame generation failed.")
-            
-    except Exception as e:
-        await status_msg.edit(content=f"{E_FAILED} Integration error processing: {str(e)}")
+        else: await status_msg.edit(content=f"{E_FAILED} Synthesis frame generation failed.")
+    except Exception as e: await status_msg.edit(content=f"{E_FAILED} Integration error processing: {str(e)}")
     finally:
         if os.path.exists(final_output):
             try: os.remove(final_output)
@@ -415,8 +526,7 @@ async def create_server_emoji(interaction: discord.Interaction, name: str, file:
         img_bytes = await file.read()
         new_emoji = await interaction.guild.create_custom_emoji(name=name, image=img_bytes)
         await status_msg.edit(content=f"{E_SUCCESS} Emoji uploaded! {new_emoji}")
-    except Exception as e:
-        await status_msg.edit(content=f"{E_FAILED} Error: {str(e)}")
+    except Exception as e: await status_msg.edit(content=f"{E_FAILED} Error: {str(e)}")
 
 @bot.tree.command(name="api", description="Links your Roblox Open Cloud API Key")
 @app_commands.describe(key="Roblox Asset API Key", target_id="User or Group ID destination", is_group="Is group ID")
@@ -436,38 +546,26 @@ async def massupload(
     if interaction.user.id not in AUTH_DATA: return await interaction.response.send_message(content=f"{E_FAILED} Use /api first.", ephemeral=True)
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
-        
     status_msg = await interaction.followup.send(content=f"{E_LDING} Reading raw file data into internal memory...")
     acc = AUTH_DATA[interaction.user.id]
-    
     raw_data = await audio_file.read()
     creator_key = "groupId" if acc["isGroup"] else "userId"
-
     await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
-    
     payloads = []
     for idx in range(1, 11):
         num_repeats = max(0, idx - 1)
-        
-        # --- ROBUST IMMUNE AUDIO TRAILER MUTATION SYSTEM ---
-        # Instead of corrupting the header, we append randomized trailing bytes.
-        # This keeps the audio valid, playable, and achieves a 100% Pass Rate.
         if num_repeats > 0:
             unique_trailer = bytes([random.randint(0, 255) for _ in range(8)]) * num_repeats
             processed_data = raw_data + unique_trailer
-        else:
-            processed_data = raw_data
-            
+        else: processed_data = raw_data
         variant_name = get_preset_title(style, idx, title)
         payloads.append((variant_name, processed_data))
-
     total_payloads = len(payloads)
     processed_count = success_count = failed_count = 0
     status_lines = []
     accepted_assets_summary = []
     ui_lock = asyncio.Lock()
     last_ui_update = 0
-    
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
         nonlocal processed_count, success_count, failed_count, last_ui_update
         async with ui_lock:
@@ -480,46 +578,32 @@ async def massupload(
                 failed_count += 1
                 err_suffix = f" ({detail})" if detail else ""
                 line = f"<a:failed:1506265787900579994> Failed/Deleted! [{name}]{err_suffix}"
-                
             status_lines.append(line)
             now = datetime.datetime.now().timestamp()
             if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
                 last_ui_update = now
                 try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
                 except: pass
-
     await status_msg.edit(content=f"{E_LDING} Opening concurrent network streaming allocation queue...")
-    
     queue = asyncio.Queue()
-    for item in payloads:
-        queue.put_nowait(item)
-        
+    for item in payloads: queue.put_nowait(item)
     async def worker():
         while not queue.empty():
-            try:
-                d_name, data = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
+            try: d_name, data = queue.get_nowait()
+            except asyncio.QueueEmpty: break
             await upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
             queue.task_done()
-
     workers = [asyncio.create_task(worker()) for _ in range(min(5, total_payloads))]
     await asyncio.gather(*workers)
-        
-    if success_count == 0:
-        await status_msg.edit(content="Audios failed to upload completely.")
+    if success_count == 0: await status_msg.edit(content="Audios failed to upload completely.")
     else:
         summary_lines = [
             f"**All audios uploaded via fast byte-processing!**",
             f"📊 `Total: {total_payloads}` | ✅ `Playable: {success_count}` | ❌ `Dropped/Deleted: {failed_count}` | 📈 `Pass Rate: {int((success_count/total_payloads)*100)}%`",
             f"\n**__Verified Live Asset Inventory Details:__**"
         ]
-        
         for idx, item in enumerate(accepted_assets_summary, 1):
-            summary_lines.append(
-                f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}`"
-            )
-        
+            summary_lines.append(f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}`")
         try: await status_msg.edit(content="\n".join(summary_lines))
         except: await interaction.channel.send("\n".join(summary_lines))
 
@@ -562,7 +646,6 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Stream scraping audio streams (Optimized)...")
     uid = get_uid()
-    
     if "spotify.com" in url.lower() or "spotify.com" in url.lower():
         try:
             tmp_spot_dir = f"spot_{uid}"
@@ -608,8 +691,7 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
                 await interaction.followup.send(file=discord.File(final_filename))
                 os.remove(final_filename)
             else: await status_msg.edit(content=f"{E_FAILED} Output structural build dropped by extractor.")
-        except asyncio.TimeoutError:
-            await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP restriction flagged.")
+        except asyncio.TimeoutError: await status_msg.edit(content=f"{E_FAILED} Extraction timed out. Server IP restriction flagged.")
         except Exception as e: await status_msg.edit(content=f"{E_FAILED} Failed: {e}")
 
 @bot.tree.command(name="loudset", description="Alters audio using mastering presets")
@@ -712,12 +794,9 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
 async def bait(interaction: discord.Interaction, choice: str, audio_file: discord.Attachment):
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
-    
     clean_choice = str(choice).strip()
-    
     if clean_choice not in BAIT_MAP:
         return await interaction.followup.send(content=f"{E_FAILED} Invalid selection. Choose a profile number from the dropdown matching your template options.")
-        
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing template sequence...")
     u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
     await audio_file.save(ip)
@@ -744,5 +823,7 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
     [os.remove(f) for f in [ip, op] if os.path.exists(f)]
 
 if __name__ == "__main__":
+    if sys.platform == 'win32':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     keep_alive()
     bot.run(TOKEN)
