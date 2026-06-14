@@ -24,7 +24,7 @@ except ImportError:
 try:
     import spotdl
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "spotdl"])
+    subprocess.check_call([sys.executable, "-m", "pip install spotdl"])
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
@@ -314,7 +314,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     user_data = COOKIE_STORE[interaction.user.id]
     cookie = user_data["cookie"]
     
-    # Parse space-separated list of IDs cleanly
     target_ids = [int(x) for x in re.findall(r'\d+', ids_string)]
     if not target_ids:
         return await status_msg.edit(content=f"{E_FAILED} No valid asset configuration tracking IDs discovered in string payload parameter.")
@@ -330,7 +329,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     ui_lock = asyncio.Lock()
     last_ui_update = 0
 
-    semaphore = asyncio.Semaphore(5) # Lowered slightly to safely handle the dual lookup + patch pipeline
+    semaphore = asyncio.Semaphore(5)
 
     async def patch_worker(asset_id: int):
         nonlocal processed_count, success_count, failed_count, last_ui_update, csrf_token
@@ -343,7 +342,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
         }
         
         async with semaphore:
-            # PHASE 1: Asset Detection & Ownership/Deletion Validation
             details_url = f"https://economy.roblox.com/v2/assets/{asset_id}/details"
             is_group = False
             target_group_id = None
@@ -359,7 +357,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                     elif detail_res.status == 200:
                         data = await detail_res.json()
                         
-                        # Detect Content Deletion
                         if data.get("IsArchived") is False and data.get("Description") == "[Content Deleted]":
                             async with ui_lock:
                                 failed_count += 1
@@ -367,7 +364,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                             processed_count += 1
                             return
 
-                        # Detect Group Ownership vs User Ownership
                         creator = data.get("Creator", {})
                         if creator.get("CreatorType") == "Group":
                             is_group = True
@@ -375,7 +371,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
             except Exception as e:
                 pass
 
-            # PHASE 2: Unarchiving Execution
             url = f"https://itemconfiguration.roblox.com/v1/assets/{asset_id}/update"
             
             for attempt in range(3):
@@ -396,7 +391,6 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                                 csrf_token = r.headers.get("X-CSRF-Token")
                                 continue
                             
-                            # Detect missing Group/Asset permissions
                             try:
                                 json_data = await r.json()
                                 if "errors" in json_data:
@@ -442,16 +436,13 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                 if (now - last_ui_update > 1.5) or (processed_count == total_tasks):
                     last_ui_update = now
                     try:
-                        # Updated this string directly to "Restoring Audios.."
                         await status_msg.edit(content=f"**Restoring Audios..** ({processed_count}/{total_tasks})\n" + "\n".join(status_lines[-6:]))
                     except:
                         pass
 
-    # Batch running concurrent worker threads asynchronously
     tasks = [asyncio.create_task(patch_worker(aid)) for aid in target_ids]
     await asyncio.gather(*tasks)
 
-    # Output breakdown presentation wrapper
     summary_msg = [
         f"🏆 **Asset Unarchive Operations Completed!**",
         f"👤 Account User context: **{user_data['username']}**",
@@ -591,14 +582,26 @@ async def massupload(
     creator_key = "groupId" if acc["isGroup"] else "userId"
     await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
     payloads = []
+    
+    # 128kbps Constant Bitrate calculation: (128000 bits/s / 8 = 16000 bytes/s) * 0.2s = 3200 bytes
+    stutter_byte_length = 3200
+    
     for idx in range(1, 11):
-        num_repeats = max(0, idx - 1)
-        if num_repeats > 0:
-            unique_trailer = bytes([random.randint(0, 255) for _ in range(8)]) * num_repeats
-            processed_data = raw_data + unique_trailer
-        else: processed_data = raw_data
+        # idx goes from 1 to 10. Number of stutters maps to (idx - 1)
+        num_stutters = idx - 1
+        
+        if num_stutters > 0 and len(raw_data) > stutter_byte_length:
+            initial_chunk = raw_data[:stutter_byte_length]
+            remaining_audio = raw_data[stutter_byte_length:]
+            # Multiply initial 200ms chunk by the slot requirement, then re-append the rest
+            processed_data = (initial_chunk * num_stutters) + remaining_audio
+        else:
+            # 1st audio (idx=1 -> num_stutters=0) gets original un-stuttered stream
+            processed_data = raw_data
+            
         variant_name = get_preset_title(style, idx, title)
         payloads.append((variant_name, processed_data))
+        
     total_payloads = len(payloads)
     processed_count = success_count = failed_count = 0
     status_lines = []
