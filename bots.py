@@ -24,7 +24,8 @@ except ImportError:
 try:
     import spotdl
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip install spotdl"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "spotdl"])
+    import spotdl
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
@@ -131,7 +132,7 @@ VOICE_MAP = {
     "Nicole (Australian English - Streamlabs)": {"engine": "Nicole", "id": "Nicole"},
     "Raveena (Indian English - Streamlabs)": {"engine": "streamlabs", "id": "Raveena"},
     "Mathieu (French - Streamlabs)": {"engine": "streamlabs", "id": "Mathieu"},
-    "Celine (French - Streamlabs)": {"engine": "streamlabs", "id": "Celine"},
+    "Celine (French - Streamlabs)": {"engine": "text", "id": "Celine"},
     "Hans (German - Streamlabs)": {"engine": "streamlabs", "id": "Hans"},
     "Marlene (German - Streamlabs)": {"engine": "streamlabs", "id": "Marlene"},
     "Enrique (Spanish European - Streamlabs)": {"engine": "streamlabs", "id": "Enrique"},
@@ -201,7 +202,6 @@ def get_preset_title(style, index, custom_name):
     return f"{custom_name}{index}"
 
 async def fetch_csrf_token(session, cookie: str) -> Optional[str]:
-    """Obtains a fresh X-CSRF-Token dynamically from Roblox auth pipeline."""
     headers = {"Cookie": f".ROBLOSECURITY={cookie}"}
     async with session.post("https://auth.roblox.com/v2/login", headers=headers) as r:
         return r.headers.get("X-CSRF-Token")
@@ -311,7 +311,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Parsing targeting sequence indexes...")
 
-    user_data = COOKIE_STORE[interaction.user.id]
+    user_data = AUTH_DATA[interaction.user.id]
     cookie = user_data["cookie"]
     
     target_ids = [int(x) for x in re.findall(r'\d+', ids_string)]
@@ -583,20 +583,16 @@ async def massupload(
     await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
     payloads = []
     
-    # 128kbps Constant Bitrate calculation: (128000 bits/s / 8 = 16000 bytes/s) * 0.2s = 3200 bytes
     stutter_byte_length = 3200
     
     for idx in range(1, 11):
-        # idx goes from 1 to 10. Number of stutters maps to (idx - 1)
         num_stutters = idx - 1
         
         if num_stutters > 0 and len(raw_data) > stutter_byte_length:
             initial_chunk = raw_data[:stutter_byte_length]
             remaining_audio = raw_data[stutter_byte_length:]
-            # Multiply initial 200ms chunk by the slot requirement, then re-append the rest
             processed_data = (initial_chunk * num_stutters) + remaining_audio
         else:
-            # 1st audio (idx=1 -> num_stutters=0) gets original un-stuttered stream
             processed_data = raw_data
             
         variant_name = get_preset_title(style, idx, title)
@@ -688,7 +684,7 @@ async def mp3_dl(interaction: discord.Interaction, url: str):
     await interaction.response.defer()
     status_msg = await interaction.followup.send(content=f"{E_LDING} Stream scraping audio streams (Optimized)...")
     uid = get_uid()
-    if "spotify.com" in url.lower() or "spotify.com" in url.lower():
+    if "spotify.com" in url.lower():
         try:
             tmp_spot_dir = f"spot_{uid}"
             os.makedirs(tmp_spot_dir, exist_ok=True)
