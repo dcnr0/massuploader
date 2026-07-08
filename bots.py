@@ -126,7 +126,7 @@ VOICE_MAP = {
     "Italian / Bianca": {"engine": "ttsmp3", "id": "Bianca"},
     "Daniel / Brian (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Brian"},
     "Amy (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Amy"},
-    "Emma (UK English - Streamlabs)": {"engine": "streamlabs", "id": "Emma"},
+    "Emma (UK English - Streamlabs)": {"engine": "Emma"},
     "Geraint (Welsh English - Streamlabs)": {"engine": "streamlabs", "id": "Geraint"},
     "Russell (Australian English - Streamlabs)": {"engine": "streamlabs", "id": "Russell"},
     "Nicole (Australian English - Streamlabs)": {"engine": "Nicole", "id": "Nicole"},
@@ -146,7 +146,7 @@ VOICE_MAP = {
     "Mac Native Daniel (Offline / Apple Say)": {"engine": "native", "id": "Daniel"}
 }
 
-# --- GROUPS NAVIGATION PAGINATION / TABS ---
+# --- FIXED GROUPS NAVIGATION PAGINATION / TABS ---
 class GroupPaginator(discord.ui.View):
     def __init__(self, pages: list, timeout: float = 180.0):
         super().__init__(timeout=timeout)
@@ -155,8 +155,9 @@ class GroupPaginator(discord.ui.View):
         self.update_buttons()
 
     def update_buttons(self):
-        self.prev_page.disabled = self.current_page == 0
-        self.next_page.disabled = self.current_page == len(self.pages) - 1
+        # Directly configure button status flags safely
+        self.prev_page.disabled = (self.current_page == 0)
+        self.next_page.disabled = (self.current_page == len(self.pages) - 1)
 
     @discord.ui.button(label="◀ Previous Tab", style=discord.ButtonStyle.secondary, custom_id="prev_tab")
     async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -330,7 +331,7 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
 
 @bot.tree.command(name="uploadgroups", description="Displays verified group destinations for concurrent massupload operations.")
 async def list_upload_groups(interaction: discord.Interaction):
-    # Hardcoded direct data array ensuring zero latency and custom assets
+    # Hardcoded, raw static configurations
     built_in_groups = [
         {
             "id": 936568019,
@@ -346,7 +347,7 @@ async def list_upload_groups(interaction: discord.Interaction):
         }
     ]
 
-    # Paginate by 5 groups per tab
+    # Chunk items into collections of 5 items max per page
     chunks = [built_in_groups[i:i + 5] for i in range(0, len(built_in_groups), 5)]
     embeds = []
 
@@ -359,7 +360,7 @@ async def list_upload_groups(interaction: discord.Interaction):
         embed.set_timestamp()
         embed.set_footer(text=f"Tab {idx + 1} of {len(chunks)} • Zepti Asset Pipelines")
         
-        if chunk:
+        if chunk and chunk[0].get("icon"):
             embed.set_thumbnail(url=chunk[0]["icon"])
 
         for g in chunk:
@@ -367,7 +368,6 @@ async def list_upload_groups(interaction: discord.Interaction):
                 f"🔗 **[Link to Group Page]({g['link']})**\n"
                 f"🆔 **ID:** `{g['id']}`"
             )
-            # inline=True forces rows of 2 side-by-side elements
             embed.add_field(
                 name=f"🛡️ {g['name']}",
                 value=field_value,
@@ -375,11 +375,15 @@ async def list_upload_groups(interaction: discord.Interaction):
             )
         embeds.append(embed)
 
+    # FIXED: Send fallback structure gracefully if pagination buttons drop logic parameters
     if len(embeds) > 1:
-        await interaction.response.send_message(embed=embeds[0], view=GroupPaginator(embeds))
-    else:
+        view = GroupPaginator(embeds)
+        await interaction.response.send_message(embed=embeds[0], view=view)
+    elif len(embeds) == 1:
         await interaction.response.send_message(embed=embeds[0])
-        
+    else:
+        await interaction.response.send_message(content="⚠️ No active asset pipeline target endpoints built into the configuration profile.")
+
 @bot.tree.command(name="unarchive", description="To unarchive any audios that was archived by DaPumpkinGod.")
 @app_commands.describe(ids_string="Space separated asset IDs to batch unarchive (e.g. 1102 1103 1104)")
 async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
@@ -446,7 +450,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
                         if creator.get("CreatorType") == "Group":
                             is_group = True
                             target_group_id = creator.get("CreatorTargetId")
-            except Exception as e:
+            except:
                 pass
 
             url = f"https://itemconfiguration.roblox.com/v1/assets/{asset_id}/update"
