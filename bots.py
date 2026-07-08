@@ -146,6 +146,32 @@ VOICE_MAP = {
     "Mac Native Daniel (Offline / Apple Say)": {"engine": "native", "id": "Daniel"}
 }
 
+# --- GROUPS NAVIGATION PAGINATION / TABS ---
+class GroupPaginator(discord.ui.View):
+    def __init__(self, pages: list, timeout: float = 180.0):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current_page = 0
+        self.update_buttons()
+
+    def update_buttons(self):
+        self.prev_page.disabled = self.current_page == 0
+        self.next_page.disabled = self.current_page == len(self.pages) - 1
+
+    @discord.ui.button(label="◀ Previous Tab", style=discord.ButtonStyle.secondary, custom_id="prev_tab")
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+
+    @discord.ui.button(label="Next Tab ▶", style=discord.ButtonStyle.primary, custom_id="next_tab")
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.pages[self.current_page], view=self)
+
 class ZeptiV77(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -301,6 +327,58 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
     return choices[:25]
 
 # --- BOT COMMANDS ---
+
+@bot.tree.command(name="uploadgroups", description="Displays verified group destinations for concurrent massupload operations.")
+async def list_upload_groups(interaction: discord.Interaction):
+    # Hardcoded, direct data array ensuring zero latency and custom assets
+    built_in_groups = [
+        {
+            "id": 936568019,
+            "name": "Dracula Gang",
+            "icon": "https://tr.rbxcdn.com/180dae4803964fdfbf79d3cb590a98fe/150/150/GroupIcon/Webp",
+            "link": "https://www.roblox.com/communities/936568019/Dracula-Gang#!/about"
+        },
+        {
+            "id": 35940974,
+            "name": "kabosu gang",
+            "icon": "https://tr.rbxcdn.com/1dfa0b639bc83beeb732a3fcbbbf76ec/150/150/GroupIcon/Webp",
+            "link": "https://www.roblox.com/communities/35940974/kabosu-gang#!/about"
+        }
+    ]
+
+    # Paginate by 5 groups per tab
+    chunks = [built_in_groups[i:i + 5] for i in range(0, len(built_in_groups), 5)]
+    embeds = []
+
+    for idx, chunk in enumerate(chunks):
+        embed = discord.Embed(
+            title="🎯 Massupload Hub: Destination Profiles",
+            description="Select an ID to pair with your execution environment via `/api` context setups.",
+            color=0x0055ff
+        )
+        embed.set_timestamp()
+        embed.set_footer(text=f"Tab {idx + 1} of {len(chunks)} • Zepti Asset Pipelines")
+        
+        if chunk:
+            embed.set_thumbnail(url=chunk[0]["icon"])
+
+        for g in chunk:
+            field_value = (
+                f"🔗 **[Link to Group Page]({g['link']})**\n"
+                f"🆔 **ID:** `{g['id']}`"
+            )
+            # inline=True forces rows of 2 side-by-side elements
+            embed.add_field(
+                name=f"🛡️ {g['name']}",
+                value=field_value,
+                inline=True
+            )
+        embeds.append(embed)
+
+    if len(embeds) > 1:
+        await interaction.response.send_message(embed=embeds[0], view=GroupPaginator(embeds))
+    else:
+        await interaction.response.send_message(embed=embeds[0])
 
 @bot.tree.command(name="unarchive", description="To unarchive any audios that was archived by DaPumpkinGod.")
 @app_commands.describe(ids_string="Space separated asset IDs to batch unarchive (e.g. 1102 1103 1104)")
