@@ -330,7 +330,7 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
 
 @bot.tree.command(name="uploadgroups", description="Displays verified group destinations for concurrent massupload operations.")
 async def list_upload_groups(interaction: discord.Interaction):
-    # Hardcoded, direct data array ensuring zero latency and custom assets
+    # Hardcoded direct data array ensuring zero latency and custom assets
     built_in_groups = [
         {
             "id": 936568019,
@@ -379,7 +379,7 @@ async def list_upload_groups(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embeds[0], view=GroupPaginator(embeds))
     else:
         await interaction.response.send_message(embed=embeds[0])
-
+        
 @bot.tree.command(name="unarchive", description="To unarchive any audios that was archived by DaPumpkinGod.")
 @app_commands.describe(ids_string="Space separated asset IDs to batch unarchive (e.g. 1102 1103 1104)")
 async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
