@@ -37,13 +37,11 @@ try:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.collections import LineCollection
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
-    from matplotlib.collections import LineCollection
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
@@ -164,7 +162,7 @@ VOICE_MAP = {
     "Mac Native Daniel (Offline / Apple Say)": {"engine": "native", "id": "Daniel"}
 }
 
-# --- FIXED GROUPS NAVIGATION PAGINATION / TABS ---
+# --- GROUPS NAVIGATION PAGINATION / TABS ---
 class GroupPaginator(discord.ui.View):
     def __init__(self, pages: list, timeout: float = 180.0):
         super().__init__(timeout=timeout)
@@ -327,7 +325,7 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
-# --- AUDIO METRICS & ANALYSIS HELPER (MEMORY OPTIMIZED) ---
+# --- AUDIO METRICS & ANALYSIS HELPER ---
 def analyze_audio_file(audio_path):
     try:
         audio = AudioSegment.from_file(audio_path)
@@ -374,14 +372,22 @@ def analyze_audio_file(audio_path):
         m_min = re.search(r'min_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
         if m_min: lowest_db = f"{m_min.group(1)} dB"
         
-        # Downsample the array specifically for waveform plotting to conserve memory (8kHz proxy)
+        # Lightweight downsampled stereo extraction (8kHz proxy)
         audio_small = audio.set_frame_rate(8000)
-        samples = np.array(audio_small.get_array_of_samples())
-        channels = audio_small.channels
-        if channels > 1:
-            samples = samples.reshape((-1, channels)).mean(axis=1)
+        raw_samples = np.array(audio_small.get_array_of_samples(), dtype=np.float32)
+        if audio_small.channels > 1:
+            samples_l = raw_samples[0::2]
+            samples_r = raw_samples[1::2]
+        else:
+            samples_l = raw_samples
+            samples_r = raw_samples.copy()
 
-        del audio, audio_small
+        # Normalize amplitudes to range [-1.0, 1.0]
+        max_val = max(np.max(np.abs(samples_l)), np.max(np.abs(samples_r)), 1.0)
+        samples_l /= max_val
+        samples_r /= max_val
+
+        del audio, audio_small, raw_samples
         gc.collect()
 
         return {
@@ -391,8 +397,8 @@ def analyze_audio_file(audio_path):
             "peak": peak_db,
             "loudness": loudness_db,
             "lowest": lowest_db,
-            "samples": samples,
-            "channels": 1
+            "samples_l": samples_l,
+            "samples_r": samples_r
         }
     except Exception as e:
         print(f"Analysis error: {e}")
@@ -404,42 +410,74 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     
     def generate_info_graphic(analysis):
         try:
-            samples = analysis["samples"]
+            samples_l = analysis["samples_l"]
+            samples_r = analysis["samples_r"]
             duration_sec = analysis["duration"]
             
-            # Optimized smaller figure size & 100 DPI to stay well below memory caps
-            fig, ax = plt.subplots(figsize=(8, 4), facecolor='#0B132B')
-            ax.set_facecolor('#1C2541')
+            # Audacity Pink/Burgundy Theme Palette
+            bg_color = '#FFFFFF'
+            border_color = '#E5C0D0'
+            wave_fill_l = '#E46B9B'
+            wave_fill_r = '#D45A8B'
+            wave_dark = '#4A152B'
+            tick_color = '#D8A8BD'
+            text_color = '#D8A8BD'
+
+            fig, ax = plt.subplots(figsize=(9, 3.2), facecolor=bg_color, dpi=100)
+            ax.set_facecolor(bg_color)
             
-            fig.suptitle(title, fontsize=14, color='#00B4D8', fontweight='bold', y=0.93)
+            # Subplot configuration
+            plt.subplots_adjust(top=0.82, bottom=0.22, left=0.08, right=0.96)
             
-            time_axis = np.linspace(0, duration_sec, num=len(samples))
-            if len(samples) > 10000:
-                step = len(samples) // 10000
-                time_axis = time_axis[::step]
-                samples = samples[::step]
+            # Audio Name on top of the image
+            fig.text(0.5, 0.93, f"🎵 {title}", fontsize=11, color='#8A2B53', fontweight='bold', ha='center', va='center')
+            
+            # Time axis arrays
+            num_pts = len(samples_l)
+            if num_pts > 8000:
+                step = num_pts // 8000
+                samples_l = samples_l[::step]
+                samples_r = samples_r[::step]
+                num_pts = len(samples_l)
                 
-            points = np.array([time_axis, samples]).T.reshape(-1, 1, 2)
-            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            time_axis = np.linspace(0, duration_sec, num=num_pts)
             
-            norm = plt.Normalize(samples.min(), samples.max())
-            lc = LineCollection(segments, cmap='Blues', norm=norm, linewidth=1.0, alpha=0.9)
-            lc.set_array(samples[:-1])
-            ax.add_collection(lc)
+            # Dual Channel Heights (Left Channel offset at +1.2, Right Channel at -1.2)
+            left_y = samples_l + 1.25
+            right_y = samples_r - 1.25
             
-            ax.set_xlim(0, duration_sec)
-            ax.set_ylim(samples.min() * 1.1 if samples.min() < 0 else -1, samples.max() * 1.1 if samples.max() > 0 else 1)
-            ax.tick_params(colors='#ADE8F4', labelsize=9)
+            # Draw Audacity-Style Waveforms
+            ax.fill_between(time_axis, 1.25, left_y, color=wave_fill_l, alpha=0.95)
+            ax.plot(time_axis, left_y, color=wave_dark, linewidth=0.4, alpha=0.7)
+            
+            ax.fill_between(time_axis, -1.25, right_y, color=wave_fill_r, alpha=0.95)
+            ax.plot(time_axis, right_y, color=wave_dark, linewidth=0.4, alpha=0.7)
+            
+            # L and R Channel Markers
+            ax.text(-0.03 * duration_sec, 1.25, 'L', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
+            ax.text(-0.03 * duration_sec, -1.25, 'R', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
+            
+            # Border styling
             for spine in ax.spines.values():
-                spine.set_edgecolor('#00B4D8')
-                spine.set_linewidth(1.2)
+                spine.set_edgecolor(border_color)
+                spine.set_linewidth(1.5)
                 
-            ax.set_xlabel("Timeline (Seconds)", fontsize=10, color='#ADE8F4')
-            ax.set_ylabel("Amplitude", fontsize=10, color='#ADE8F4')
-            ax.grid(True, linestyle='--', alpha=0.2, color='#90E0EF')
+            ax.set_xlim(0, duration_sec)
+            ax.set_ylim(-2.6, 2.6)
             
-            plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.88])
-            plt.savefig(img_path, dpi=100, facecolor=fig.get_facecolor(), edgecolor='#00B4D8')
+            # Ticks & Timeline Formatting
+            ax.tick_params(axis='x', colors=text_color, labelsize=10, length=6, width=1.5, direction='out')
+            ax.tick_params(axis='y', left=False, labelleft=False)
+            
+            # Format timeline MM:SS
+            def format_time(x, pos):
+                m = int(x // 60)
+                s = int(x % 60)
+                return f"{m}:{s:02d}"
+                
+            ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(format_time))
+            
+            plt.savefig(img_path, dpi=100, facecolor=fig.get_facecolor(), edgecolor=border_color)
             plt.close(fig)
             plt.clf()
             gc.collect()
@@ -463,7 +501,7 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     end_min = int(analysis['duration'] // 60)
     end_sec = int(analysis['duration'] % 60)
     
-    # Blue embed implementation for /bait, /tts, /analyze, etc.
+    # Blue Embed output structure
     embed = discord.Embed(
         title=f"🎵 {title}",
         color=0x0055ff
@@ -477,6 +515,9 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     
     if success_gen and os.path.exists(img_path):
         embed.set_image(url=f"attachment://{img_path}")
+        
+    # Watermark footer set at the bottom of the embed
+    embed.set_footer(text="zepti's massuploader")
         
     await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=files_to_send)
     
@@ -533,7 +574,7 @@ async def list_upload_groups(interaction: discord.Interaction):
             color=0x0055ff
         )
         embed.set_timestamp()
-        embed.set_footer(text=f"Tab {idx + 1} of {len(chunks)} • Zepti Asset Pipelines")
+        embed.set_footer(text=f"Tab {idx + 1} of {len(chunks)} • zepti's massuploader")
         
         if chunk and chunk[0].get("icon"):
             embed.set_thumbnail(url=chunk[0]["icon"])
@@ -719,10 +760,11 @@ async def analyze_command(interaction: discord.Interaction, asset_id: Optional[s
     status_msg = await interaction.followup.send(content=f"{E_LDING} Fetching and analyzing audio source...")
     
     uid = get_uid()
-    target_path = f"analyze_{uid}.mp3"
     
     try:
         if audio_file:
+            ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+            target_path = f"analyze_{uid}.{ext}"
             await audio_file.save(target_path)
             title = f"Audio Analysis ({audio_file.filename})"
         elif asset_id:
@@ -730,6 +772,7 @@ async def analyze_command(interaction: discord.Interaction, asset_id: Optional[s
             if not clean_id:
                 return await status_msg.edit(content=f"{E_FAILED} Invalid Roblox Asset ID provided.")
             aid = clean_id.group(0)
+            target_path = f"analyze_{uid}.mp3"
             
             cdn_url = f"https://assetdelivery.roblox.com/v1/asset?id={aid}"
             async with bot.session.get(cdn_url) as resp:
@@ -748,7 +791,7 @@ async def analyze_command(interaction: discord.Interaction, asset_id: Optional[s
     except Exception as e:
         await status_msg.edit(content=f"{E_FAILED} Analysis error: {str(e)}")
     finally:
-        if os.path.exists(target_path):
+        if 'target_path' in locals() and os.path.exists(target_path):
             try: os.remove(target_path)
             except: pass
         gc.collect()
@@ -762,7 +805,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
         return await interaction.followup.send(content=f"{E_FAILED} Invalid voice name selected. Please select a choice from the dynamic autocomplete list.")
     status_msg = await interaction.followup.send(content=f"{E_LDING} Querying voice engine pipeline allocation...")
     uid = get_uid()
-    final_output = f"tts_final_{uid}.ogg"
+    final_output = f"tts_final_{uid}.mp3"
     cfg = VOICE_MAP[voice]
     engine = cfg["engine"]
     voice_id = cfg["id"]
@@ -778,7 +821,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                     if resp_json.get("Error") == 0:
                         async with bot.session.get(resp_json.get("URL")) as file_resp:
                             if file_resp.status == 200:
-                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libmp3lame', '-q:a', '2', final_output]
                                 proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 await proc.communicate(input=await file_resp.read())
                                 success = True
@@ -791,7 +834,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                     if data.get("success"):
                         async with bot.session.get(data["speak_url"]) as file_resp:
                             if file_resp.status == 200:
-                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                                cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libmp3lame', '-q:a', '2', final_output]
                                 proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 await proc.communicate(input=await file_resp.read())
                                 success = True
@@ -804,7 +847,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                     data = await resp.json()
                     if "audio" in data:
                         raw_bytes = base64.b64decode(data["audio"])
-                        cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                        cmd = ['ffmpeg', '-y', '-i', 'pipe:0', '-af', 'volume=1.5', '-c:a', 'libmp3lame', '-q:a', '2', final_output]
                         proc = await asyncio.create_subprocess_exec(*cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         await proc.communicate(input=raw_bytes)
                         success = True
@@ -814,7 +857,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
             proc = await asyncio.create_subprocess_exec('say', '-v', voice_id, safe_text, '-o', tmp_aiff, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             await proc.communicate()
             if os.path.exists(tmp_aiff):
-                cmd = ['ffmpeg', '-y', '-i', tmp_aiff, '-af', 'volume=1.6', '-c:a', 'libvorbis', '-q:a', '5', final_output]
+                cmd = ['ffmpeg', '-y', '-i', tmp_aiff, '-af', 'volume=1.6', '-c:a', 'libmp3lame', '-q:a', '2', final_output]
                 proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 await proc.communicate()
                 try: os.remove(tmp_aiff)
@@ -957,18 +1000,20 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
         async def callback(self, i: discord.Interaction):
             await i.response.defer()
             progress_msg = await i.followup.send(content=f"{E_LDING} Processing...")
-            u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
+            u = get_uid()
+            ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+            ip, op = f"mi_{u}.{ext}", f"mo_{u}.{ext}"
             await audio_file.save(ip)
             try:
                 if self.values[0] == "8d":
-                    cmd = ['ffmpeg', '-y', '-i', ip, '-af', "aphaser=in_gain=0.6:out_gain=1:delay=2:decay=0.4:speed=0.5:type=t,apulsator=mode=sine:hz=0.2:amount=1", '-c:a', 'libvorbis', '-q:a', '5', op]
+                    cmd = ['ffmpeg', '-y', '-i', ip, '-af', "aphaser=in_gain=0.6:out_gain=1:delay=2:decay=0.4:speed=0.5:type=t,apulsator=mode=sine:hz=0.2:amount=1", op]
                     proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await proc.communicate()
                     if os.path.exists(op):
                         await process_and_send_audio_result(i, progress_msg, op, "8D Audio Filter Applied")
                     else: await progress_msg.edit(content=f"{E_FAILED} Method failed.")
                 elif self.values[0] == "copyright":
-                    cmd = ['ffmpeg', '-y', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op]
+                    cmd = ['ffmpeg', '-y', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", op]
                     proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await proc.communicate()
                     if os.path.exists(op):
@@ -1049,7 +1094,9 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
         async def callback(self, i):
             await i.response.defer()
             progress_msg = await i.followup.send(content=f"{E_LDING} Processing...")
-            u = get_uid(); ip, op = f"li_{u}.mp3", f"lo_{u}.ogg"
+            u = get_uid()
+            ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+            ip, op = f"li_{u}.{ext}", f"lo_{u}.{ext}"
             await audio_file.save(ip)
             try:
                 if self.values[0] == "13":
@@ -1061,7 +1108,7 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
                         with AudioFile(ip) as af: rs = get_loud_preset(self.values[0])(af.read(af.frames), af.samplerate)
                         tw = f"lt_{u}.wav"
                         with AudioFile(tw, 'w', af.samplerate, rs.shape[0]) as o: o.write(rs)
-                        AudioSegment.from_file(tw).export(op, format="ogg"); os.remove(tw)
+                        AudioSegment.from_file(tw).export(op, format=ext); os.remove(tw)
                     await asyncio.get_event_loop().run_in_executor(None, proc_audio)
                 if os.path.exists(op):
                     await process_and_send_audio_result(i, progress_msg, op, f"LoudPreset_{self.values[0]}")
@@ -1083,7 +1130,9 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
-    u = get_uid(); ip, op = f"mi_{u}.mp3", f"mo_{u}.ogg"
+    u = get_uid()
+    ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+    ip, op = f"mi_{u}.{ext}", f"mo_{u}.{ext}"
     macro_text = (await macro_file.read()).decode('utf-8', errors='ignore'); await audio_file.save(ip)
     effects = []
     if 'Compressor:' in macro_text:
@@ -1099,7 +1148,7 @@ async def macro(interaction: discord.Interaction, audio_file: discord.Attachment
         with AudioFile(ip) as af: pr = Pedalboard(effects)(af.read(af.frames), af.samplerate)
         tw = f"mt_{u}.wav"
         with AudioFile(tw, 'w', af.samplerate, pr.shape[0]) as o: o.write(pr)
-        subprocess.run(['ffmpeg', '-i', tw, '-c:a', 'libvorbis', '-q:a', '0', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); os.remove(tw)
+        subprocess.run(['ffmpeg', '-i', tw, op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); os.remove(tw)
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
         await status_msg.edit(content=f"{E_SUCCESS} Macro applied.")
@@ -1114,9 +1163,11 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
-    u = get_uid(); ip, op = f"pi_{u}.mp3", f"po_{u}.ogg"
+    u = get_uid()
+    ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+    ip, op = f"pi_{u}.{ext}", f"po_{u}.{ext}"
     await audio_file.save(ip)
-    def run(): subprocess.run(['ffmpeg', '-i', ip, '-af', f"asetrate={int(44100*val)},aresample=44100", '-c:a', 'libvorbis', '-q:a', '5', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def run(): subprocess.run(['ffmpeg', '-i', ip, '-af', f"asetrate={int(44100*val)},aresample=44100", op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
         await process_and_send_audio_result(interaction, status_msg, op, f"Pitch Shift ({val}x)")
@@ -1136,9 +1187,11 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     try: await interaction.response.defer()
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing...")
-    u = get_uid(); bp, mp, op = f"b_{u}.mp3", f"m_{u}.mp3", f"t_{u}.ogg"
+    u = get_uid()
+    ext = main.filename.split('.')[-1].lower() if '.' in main.filename else 'mp3'
+    bp, mp, op = f"b_{u}.{ext}", f"m_{u}.{ext}", f"t_{u}.{ext}"
     await bait.save(bp); await main.save(mp)
-    def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
+    def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format=ext)
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
         await process_and_send_audio_result(interaction, status_msg, op, "TPOS Conjoined Track")
@@ -1160,7 +1213,9 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
     if clean_choice not in BAIT_MAP:
         return await interaction.followup.send(content=f"{E_FAILED} Invalid selection. Choose a profile number from the dropdown matching your template options.")
     status_msg = await interaction.followup.send(content=f"{E_LDING} Processing template sequence...")
-    u = get_uid(); ip, op = f"bi_{u}.mp3", f"bo_{u}.ogg"
+    u = get_uid()
+    ext = audio_file.filename.split('.')[-1].lower() if '.' in audio_file.filename else 'mp3'
+    ip, op = f"bi_{u}.{ext}", f"bo_{u}.{ext}"
     await audio_file.save(ip)
     cfg = BAIT_MAP[clean_choice]
     def run_bait_mixing():
@@ -1174,7 +1229,7 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
             bait_track2 = AudioSegment.from_file(bait2_path)
             res = bait_track1 + main_track + bait_track2
         else: res = bait_track1 + main_track
-        res[:419999].export(op, format="ogg")
+        res[:419999].export(op, format=ext)
     try:
         await asyncio.get_event_loop().run_in_executor(None, run_bait_mixing)
         if os.path.exists(op):
