@@ -382,7 +382,6 @@ def analyze_audio_file(audio_path):
             samples_l = raw_samples
             samples_r = raw_samples.copy()
 
-        # Normalize amplitudes to range [-1.0, 1.0]
         max_val = max(np.max(np.abs(samples_l)), np.max(np.abs(samples_r)), 1.0)
         samples_l /= max_val
         samples_r /= max_val
@@ -414,25 +413,19 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
             samples_r = analysis["samples_r"]
             duration_sec = analysis["duration"]
             
-            # Audacity Pink/Burgundy Theme Palette
             bg_color = '#FFFFFF'
             border_color = '#E5C0D0'
             wave_fill_l = '#E46B9B'
             wave_fill_r = '#D45A8B'
             wave_dark = '#4A152B'
-            tick_color = '#D8A8BD'
             text_color = '#D8A8BD'
 
             fig, ax = plt.subplots(figsize=(9, 3.2), facecolor=bg_color, dpi=100)
             ax.set_facecolor(bg_color)
             
-            # Subplot configuration
             plt.subplots_adjust(top=0.82, bottom=0.22, left=0.08, right=0.96)
-            
-            # Audio Name on top of the image
             fig.text(0.5, 0.93, f"🎵 {title}", fontsize=11, color='#8A2B53', fontweight='bold', ha='center', va='center')
             
-            # Time axis arrays
             num_pts = len(samples_l)
             if num_pts > 8000:
                 step = num_pts // 8000
@@ -442,22 +435,18 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
                 
             time_axis = np.linspace(0, duration_sec, num=num_pts)
             
-            # Dual Channel Heights (Left Channel offset at +1.2, Right Channel at -1.2)
             left_y = samples_l + 1.25
             right_y = samples_r - 1.25
             
-            # Draw Audacity-Style Waveforms
             ax.fill_between(time_axis, 1.25, left_y, color=wave_fill_l, alpha=0.95)
             ax.plot(time_axis, left_y, color=wave_dark, linewidth=0.4, alpha=0.7)
             
             ax.fill_between(time_axis, -1.25, right_y, color=wave_fill_r, alpha=0.95)
             ax.plot(time_axis, right_y, color=wave_dark, linewidth=0.4, alpha=0.7)
             
-            # L and R Channel Markers
             ax.text(-0.03 * duration_sec, 1.25, 'L', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
             ax.text(-0.03 * duration_sec, -1.25, 'R', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
             
-            # Border styling
             for spine in ax.spines.values():
                 spine.set_edgecolor(border_color)
                 spine.set_linewidth(1.5)
@@ -465,11 +454,9 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
             ax.set_xlim(0, duration_sec)
             ax.set_ylim(-2.6, 2.6)
             
-            # Ticks & Timeline Formatting
             ax.tick_params(axis='x', colors=text_color, labelsize=10, length=6, width=1.5, direction='out')
             ax.tick_params(axis='y', left=False, labelleft=False)
             
-            # Format timeline MM:SS
             def format_time(x, pos):
                 m = int(x // 60)
                 s = int(x % 60)
@@ -501,7 +488,6 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     end_min = int(analysis['duration'] // 60)
     end_sec = int(analysis['duration'] % 60)
     
-    # Blue Embed output structure
     embed = discord.Embed(
         title=f"🎵 {title}",
         color=0x0055ff
@@ -516,7 +502,6 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     if success_gen and os.path.exists(img_path):
         embed.set_image(url=f"attachment://{img_path}")
         
-    # Watermark footer set at the bottom of the embed
     embed.set_footer(text="zepti's massuploader")
         
     await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=files_to_send)
@@ -921,14 +906,33 @@ async def massupload(
     except discord.errors.NotFound: return
     status_msg = await interaction.followup.send(content=f"{E_LDING} Reading raw file data into internal memory...")
     acc = AUTH_DATA[interaction.user.id]
+    
+    # Read raw bytes once and clear immediately after iteration to save RAM
     raw_data = await audio_file.read()
     creator_key = "groupId" if acc["isGroup"] else "userId"
-    await status_msg.edit(content=f"{E_LDING} Processing byte headers & variation array streams concurrently...")
-    payloads = []
+    await status_msg.edit(content=f"{E_LDING} Processing byte headers & sequential variation streams...")
     
+    total_payloads = 10
+    processed_count = success_count = failed_count = 0
+    status_lines = []
+    accepted_assets_summary = []
     stutter_byte_length = 3200
-    
-    for idx in range(1, 11):
+
+    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
+        nonlocal processed_count, success_count, failed_count
+        processed_count += 1
+        if success:
+            success_count += 1
+            line = f"<a:success:1506265759452631082> *{name}* uploaded successfully!"
+            accepted_assets_summary.append({"name": name, "asset_id": asset_id})
+        else:
+            failed_count += 1
+            err_suffix = f" ({detail})" if detail else ""
+            line = f"<a:failed:1506265787900579994> Failed/Deleted! [{name}]{err_suffix}"
+        status_lines.append(line)
+
+    # SEQUENTIAL BATCH PROCESSING: Prevents memory spikes from loading all 10 heavy audio arrays at once
+    for idx in range(1, total_payloads + 1):
         num_stutters = idx - 1
         
         if num_stutters > 0 and len(raw_data) > stutter_byte_length:
@@ -939,46 +943,23 @@ async def massupload(
             processed_data = raw_data
             
         variant_name = get_preset_title(style, idx, title)
-        payloads.append((variant_name, processed_data))
         
-    total_payloads = len(payloads)
-    processed_count = success_count = failed_count = 0
-    status_lines = []
-    accepted_assets_summary = []
-    ui_lock = asyncio.Lock()
-    last_ui_update = 0
+        # Upload one by one and immediately collect garbage
+        await upload_burst(bot.session, processed_data, variant_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
+        
+        del processed_data
+        gc.collect()
+        
+        try:
+            await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
+        except:
+            pass
 
-    async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
-        nonlocal processed_count, success_count, failed_count, last_ui_update
-        async with ui_lock:
-            processed_count += 1
-            if success:
-                success_count += 1
-                line = f"<a:success:1506265759452631082> *{name}* uploaded successfully!"
-                accepted_assets_summary.append({"name": name, "asset_id": asset_id})
-            else:
-                failed_count += 1
-                err_suffix = f" ({detail})" if detail else ""
-                line = f"<a:failed:1506265787900579994> Failed/Deleted! [{name}]{err_suffix}"
-            status_lines.append(line)
-            now = datetime.datetime.now().timestamp()
-            if (now - last_ui_update > 1.5) or (processed_count == total_payloads):
-                last_ui_update = now
-                try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
-                except: pass
+    del raw_data
+    gc.collect()
 
-    await status_msg.edit(content=f"{E_LDING} Opening concurrent network streaming allocation queue...")
-    queue = asyncio.Queue()
-    for item in payloads: queue.put_nowait(item)
-    async def worker():
-        while not queue.empty():
-            try: d_name, data = queue.get_nowait()
-            except asyncio.QueueEmpty: break
-            await upload_burst(bot.session, data, d_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
-            queue.task_done()
-    workers = [asyncio.create_task(worker()) for _ in range(min(5, total_payloads))]
-    await asyncio.gather(*workers)
-    if success_count == 0: await status_msg.edit(content="Audios failed to upload completely.")
+    if success_count == 0: 
+        await status_msg.edit(content="Audios failed to upload completely.")
     else:
         summary_lines = [
             f"**All audios uploaded via fast byte-processing!**",
@@ -987,8 +968,10 @@ async def massupload(
         ]
         for idx, item in enumerate(accepted_assets_summary, 1):
             summary_lines.append(f"**{idx}.** `{item['name']}` 🔗 **ID:** `{item['asset_id']}`")
-        try: await status_msg.edit(content="\n".join(summary_lines))
-        except: await interaction.channel.send("\n".join(summary_lines))
+        try: 
+            await status_msg.edit(content="\n".join(summary_lines))
+        except: 
+            await interaction.channel.send("\n".join(summary_lines))
     gc.collect()
 
 @bot.tree.command(name="method", description="Processes audio through complex phase loops")
