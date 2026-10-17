@@ -491,7 +491,6 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
             ax.tick_params(axis='x', colors=text_color, labelsize=10, length=6, width=1.5, direction='out')
             ax.tick_params(axis='y', left=False, labelleft=False)
             
-            # Precise Timeline Formatting & AutoLocator Spacing
             if duration_sec <= 10:
                 ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
             elif duration_sec <= 60:
@@ -527,15 +526,10 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
 
     success_gen = await asyncio.get_event_loop().run_in_executor(None, generate_info_graphic, analysis)
     
-    files_to_send = [discord.File(audio_path)]
-    if success_gen and os.path.exists(img_path):
-        files_to_send.append(discord.File(img_path))
-        
     embed = discord.Embed(
         title=f"🎵 {title}",
         color=0x0055ff
     )
-    # Match exact user reference layout fields while keeping requested quality string & 0.000 MB precision
     embed.add_field(name="Duration", value=f"`{analysis['duration_formatted']}`", inline=True)
     embed.add_field(name="Size", value=f"`{analysis['size']}`", inline=True)
     embed.add_field(name="Bitrate", value=f"`{analysis['bitrate']}`", inline=True)
@@ -551,7 +545,23 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
         
     embed.set_footer(text="zepti's massuploader")
         
-    await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=files_to_send)
+    try:
+        # STEP 1: Send the processed audio file as a separate message first (bypasses combined 413 webhook limit)
+        if os.path.exists(audio_path):
+            await interaction.followup.send(file=discord.File(audio_path))
+
+        # STEP 2: Edit the status message to show the waveform image and full embed stats
+        if success_gen and os.path.exists(img_path):
+            await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=[discord.File(img_path)])
+        else:
+            await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed)
+            
+    except discord.errors.HTTPException as e:
+        if e.code == 40005 or e.status == 413:
+            embed.remove_image()
+            await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully! (Waveform image omitted due to size limits)", embed=embed)
+        else:
+            raise e
     
     if os.path.exists(img_path):
         try: os.remove(img_path)
