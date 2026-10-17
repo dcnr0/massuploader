@@ -27,6 +27,24 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "spotdl"])
     import spotdl
 
+try:
+    import numpy as np
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+    import numpy as np
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
 
@@ -104,7 +122,7 @@ BAIT_MAP = {
     "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"},
     "29": {"files": ["aspart1.mp3", "aspart2.mp3"], "type": "sandwich"},
     "30": {"files": ["extra1_part1.ogg", "extra1_part2.ogg"], "type": "sandwich"},
-    "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"},
+    "31": {"files": ["extra2_part1.ogg", "extra2_part2.ogg"], "type": "sandwich"},
     "32": {"files": ["477s.mp3", "477s 2.mp3"], "type": "sandwich"},
     "33": {"files": ["finally found it.mp3", "finally found it 2.mp3"], "type": "sandwich"}
 }
@@ -155,7 +173,6 @@ class GroupPaginator(discord.ui.View):
         self.update_buttons()
 
     def update_buttons(self):
-        # Directly configure button status flags safely
         self.prev_page.disabled = (self.current_page == 0)
         self.next_page.disabled = (self.current_page == len(self.pages) - 1)
 
@@ -310,6 +327,162 @@ async def upload_burst(session, data, name, api_key, target_id, creator_key, liv
     await live_status_callback(success=False, name=name, detail="Retries Exhausted", asset_id=None, op_id=None)
     return False
 
+# --- AUDIO METRICS & ANALYSIS HELPER ---
+def analyze_audio_file(audio_path):
+    try:
+        audio = AudioSegment.from_file(audio_path)
+        duration_sec = len(audio) / 1000.0
+        file_size_bytes = os.path.getsize(audio_path)
+        file_size_mb = f"{file_size_bytes / (1024 * 1024):.2f} MB"
+        file_type = audio_path.split('.')[-1].lower()
+        
+        # Extract codec and sample rate using ffprobe/ffmpeg info
+        ffprobe_proc = subprocess.run(
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', audio_path],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        codec_name = file_type
+        sample_rate_hz = audio.frame_rate
+        try:
+            data = json.loads(ffprobe_proc.stdout)
+            for stream in data.get('streams', []):
+                if stream.get('codec_type') == 'audio':
+                    codec_name = stream.get('codec_name', file_type)
+                    if 'sample_rate' in stream:
+                        sample_rate_hz = int(stream['sample_rate'])
+                    break
+        except:
+            pass
+            
+        quality_str = f"{file_type} {codec_name} {sample_rate_hz}Hz"
+        
+        vol_proc = subprocess.run(
+            ['ffmpeg', '-i', audio_path, '-af', 'volumedetect', '-f', 'null', '-'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        stderr_out = vol_proc.stderr
+        
+        peak_db = "N/A"
+        loudness_db = "N/A"
+        lowest_db = "N/A"
+        
+        m_max = re.search(r'max_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
+        if m_max: peak_db = f"{m_max.group(1)} dB"
+        
+        m_mean = re.search(r'mean_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
+        if m_mean: loudness_db = f"{m_mean.group(1)} dB"
+        
+        m_min = re.search(r'min_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
+        if m_min: lowest_db = f"{m_min.group(1)} dB"
+        
+        return {
+            "duration": duration_sec,
+            "size": file_size_mb,
+            "quality": quality_str,
+            "peak": peak_db,
+            "loudness": loudness_db,
+            "lowest": lowest_db,
+            "samples": audio.get_array_of_samples(),
+            "channels": audio.channels
+        }
+    except Exception as e:
+        print(f"Analysis error: {e}")
+        return None
+
+async def process_and_send_audio_result(interaction, status_msg, audio_path, title, use_embed=False):
+    u = get_uid()
+    img_path = f"waveform_{u}.png"
+    
+    def generate_info_graphic(analysis):
+        try:
+            samples = np.array(analysis["samples"])
+            if analysis["channels"] > 1:
+                samples = samples.reshape((-1, analysis["channels"])).mean(axis=1)
+                
+            duration_sec = analysis["duration"]
+            
+            fig, ax = plt.subplots(figsize=(10, 5.5), facecolor='#0B132B')
+            ax.set_facecolor('#1C2541')
+            
+            fig.suptitle(title, fontsize=16, color='#00B4D8', fontweight='bold', y=0.95)
+            
+            time_axis = np.linspace(0, duration_sec, num=len(samples))
+            if len(samples) > 20000:
+                step = len(samples) // 20000
+                time_axis = time_axis[::step]
+                samples = samples[::step]
+                
+            points = np.array([time_axis, samples]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            
+            norm = plt.Normalize(samples.min(), samples.max())
+            lc = LineCollection(segments, cmap='Blues', norm=norm, linewidth=1.2, alpha=0.9)
+            lc.set_array(samples[:-1])
+            ax.add_collection(lc)
+            
+            ax.set_xlim(0, duration_sec)
+            ax.set_ylim(samples.min() * 1.1 if samples.min() < 0 else -1, samples.max() * 1.1 if samples.max() > 0 else 1)
+            ax.tick_params(colors='#ADE8F4', labelsize=10)
+            for spine in ax.spines.values():
+                spine.set_edgecolor('#00B4D8')
+                spine.set_linewidth(1.5)
+                
+            ax.set_xlabel("Timeline (Seconds)", fontsize=11, color='#ADE8F4')
+            ax.set_ylabel("Amplitude", fontsize=11, color='#ADE8F4')
+            ax.grid(True, linestyle='--', alpha=0.2, color='#90E0EF')
+            
+            end_min = int(duration_sec // 60)
+            end_sec = int(duration_sec % 60)
+            
+            if not use_embed:
+                info_text = f"Quality: {analysis['quality']} | Size: {analysis['size']} | Loudness: {analysis['loudness']} | Peak: {analysis['peak']} | Lowest: {analysis['lowest']}"
+                timeline_text = f"Start: 00:00  ─────────────────  End: {end_min:02d}:{end_sec:02d}"
+                plt.figtext(0.5, 0.13, info_text, ha='center', fontsize=10, color='#FFFFFF', weight='bold', bbox=dict(facecolor='#1C2541', edgecolor='#00B4D8', boxstyle='round,pad=0.5', linewidth=1))
+                plt.figtext(0.5, 0.04, timeline_text, ha='center', fontsize=10, color='#CAF0F8', weight='semibold')
+            
+            plt.tight_layout(rect=[0.05, 0.08 if use_embed else 0.16, 0.95, 0.90])
+            plt.savefig(img_path, dpi=150, facecolor=fig.get_facecolor(), edgecolor='#00B4D8')
+            plt.close(fig)
+            return True
+        except Exception as e:
+            print(f"Error generating waveform graphic: {e}")
+            return False
+
+    analysis = await asyncio.get_event_loop().run_in_executor(None, analyze_audio_file, audio_path)
+    if not analysis:
+        return await status_msg.edit(content=f"{E_FAILED} Failed to analyze audio file.")
+
+    success_gen = await asyncio.get_event_loop().run_in_executor(None, generate_info_graphic, analysis)
+    
+    files_to_send = [discord.File(audio_path)]
+    if success_gen and os.path.exists(img_path):
+        files_to_send.append(discord.File(img_path))
+        
+    if use_embed:
+        end_min = int(analysis['duration'] // 60)
+        end_sec = int(analysis['duration'] % 60)
+        embed = discord.Embed(
+            title=f"🎵 {title}",
+            color=0x0055ff
+        )
+        embed.add_field(name="Quality & Format", value=f"`{analysis['quality']}`", inline=True)
+        embed.add_field(name="File Size", value=f"`{analysis['size']}`", inline=True)
+        embed.add_field(name="Loudness", value=f"`{analysis['loudness']}`", inline=True)
+        embed.add_field(name="Peak dB", value=f"`{analysis['peak']}`", inline=True)
+        embed.add_field(name="Lowest dB", value=f"`{analysis['lowest']}`", inline=True)
+        embed.add_field(name="Timeline", value=f"`Start: 00:00` ➔ `End: {end_min:02d}:{end_sec:02d}`", inline=False)
+        if os.path.exists(img_path):
+            embed.set_image(url=f"attachment://{img_path}")
+            
+        await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=files_to_send)
+    else:
+        await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!")
+        await interaction.followup.send(files=files_to_send)
+    
+    if os.path.exists(img_path):
+        try: os.remove(img_path)
+        except: pass
+
 # --- AUTOCOMPLETE LOGIC ---
 async def voice_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
     choices = [
@@ -331,7 +504,6 @@ async def bait_autocomplete(interaction: discord.Interaction, current: str) -> L
 
 @bot.tree.command(name="uploadgroups", description="Displays verified group destinations for concurrent massupload operations.")
 async def list_upload_groups(interaction: discord.Interaction):
-    # Hardcoded, raw static configurations
     built_in_groups = [
         {
             "id": 936568019,
@@ -347,7 +519,6 @@ async def list_upload_groups(interaction: discord.Interaction):
         }
     ]
 
-    # Chunk items into collections of 5 items max per page
     chunks = [built_in_groups[i:i + 5] for i in range(0, len(built_in_groups), 5)]
     embeds = []
 
@@ -375,7 +546,6 @@ async def list_upload_groups(interaction: discord.Interaction):
             )
         embeds.append(embed)
 
-    # FIXED: Send fallback structure gracefully if pagination buttons drop logic parameters
     if len(embeds) > 1:
         view = GroupPaginator(embeds)
         await interaction.response.send_message(embed=embeds[0], view=view)
@@ -394,7 +564,7 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
     status_msg = await interaction.followup.send(content=f"{E_LDING} Parsing targeting sequence indexes...")
 
     user_data = AUTH_DATA[interaction.user.id]
-    cookie = user_data["cookie"]
+    cookie = user_data["cookie"] if "cookie" in user_data else ""
     
     target_ids = [int(x) for x in re.findall(r'\d+', ids_string)]
     if not target_ids:
@@ -527,14 +697,58 @@ async def mass_unarchive(interaction: discord.Interaction, ids_string: str):
 
     summary_msg = [
         f"🏆 **Asset Unarchive Operations Completed!**",
-        f"👤 Account User context: **{user_data['username']}**",
+        f"👤 Account User context: **{user_data.get('username', 'User')}**",
         f"📊 `Total Targeted: {total_tasks}` | ✅ `Unarchived: {success_count}` | ❌ `Failed: {failed_count}` | 📈 `Success Rate: {int((success_count/total_tasks)*100) if total_tasks > 0 else 0}%`"
     ]
     try:
         await status_msg.edit(content="\n".join(summary_msg))
     except:
         await interaction.channel.send("\n".join(summary_msg))
+
+@bot.tree.command(name="analyze", description="Analyzes a Roblox audio asset ID or uploaded audio file")
+@app_commands.describe(asset_id="Roblox Asset ID (optional)", audio_file="Upload audio file (optional)")
+async def analyze_command(interaction: discord.Interaction, asset_id: Optional[str] = None, audio_file: Optional[discord.Attachment] = None):
+    if not asset_id and not audio_file:
+        return await interaction.response.send_message(content=f"{E_FAILED} Please provide either a Roblox Asset ID or upload an audio file.", ephemeral=True)
         
+    await interaction.response.defer()
+    status_msg = await interaction.followup.send(content=f"{E_LDING} Fetching and analyzing audio source...")
+    
+    uid = get_uid()
+    target_path = f"analyze_{uid}.mp3"
+    
+    try:
+        if audio_file:
+            await audio_file.save(target_path)
+            title = f"Audio Analysis ({audio_file.filename})"
+        elif asset_id:
+            clean_id = re.search(r'\d+', asset_id)
+            if not clean_id:
+                return await status_msg.edit(content=f"{E_FAILED} Invalid Roblox Asset ID provided.")
+            aid = clean_id.group(0)
+            
+            # Fetch audio content from Roblox CDN / delivery
+            cdn_url = f"https://assetdelivery.roblox.com/v1/asset?id={aid}"
+            async with bot.session.get(cdn_url) as resp:
+                if resp.status != 200:
+                    return await status_msg.edit(content=f"{E_FAILED} Failed to download Roblox audio ID `{aid}` (HTTP {resp.status}).")
+                content = await resp.read()
+                
+            with open(target_path, 'wb') as f:
+                f.write(content)
+            title = f"Roblox Audio Analysis (ID: {aid})"
+            
+        if os.path.exists(target_path):
+            await process_and_send_audio_result(interaction, status_msg, target_path, title, use_embed=True)
+        else:
+            await status_msg.edit(content=f"{E_FAILED} Failed to prepare target audio file.")
+    except Exception as e:
+        await status_msg.edit(content=f"{E_FAILED} Analysis error: {str(e)}")
+    finally:
+        if os.path.exists(target_path):
+            try: os.remove(target_path)
+            except: pass
+
 @bot.tree.command(name="tts", description="Generates multi-engine text-to-speech files seamlessly")
 @app_commands.describe(voice="Type to search through all 34 premium voices available", text="Message text content to speak")
 @app_commands.autocomplete(voice=voice_autocomplete)
@@ -603,8 +817,7 @@ async def tts_generation(interaction: discord.Interaction, voice: str, text: str
                 except: pass
                 success = True
         if success and os.path.exists(final_output):
-            await status_msg.edit(content=f"{E_SUCCESS} Generated Voice Track (`{voice}`).")
-            await interaction.followup.send(file=discord.File(final_output))
+            await process_and_send_audio_result(interaction, status_msg, final_output, f"TTS Generation ({voice})", use_embed=True)
         else: await status_msg.edit(content=f"{E_FAILED} Synthesis frame generation failed.")
     except Exception as e: await status_msg.edit(content=f"{E_FAILED} Integration error processing: {str(e)}")
     finally:
@@ -686,6 +899,7 @@ async def massupload(
     accepted_assets_summary = []
     ui_lock = asyncio.Lock()
     last_ui_update = 0
+
     async def status_update_worker(success: bool, name: str, detail: Optional[str] = None, asset_id: Optional[str] = None, op_id: Optional[str] = None):
         nonlocal processed_count, success_count, failed_count, last_ui_update
         async with ui_lock:
@@ -704,6 +918,7 @@ async def massupload(
                 last_ui_update = now
                 try: await status_msg.edit(content=f"**Processing Life-Cycle Arrays:** ({processed_count}/{total_payloads})\n" + "\n".join(status_lines[-8:]))
                 except: pass
+
     await status_msg.edit(content=f"{E_LDING} Opening concurrent network streaming allocation queue...")
     queue = asyncio.Queue()
     for item in payloads: queue.put_nowait(item)
@@ -744,19 +959,22 @@ async def bypass_method(interaction: discord.Interaction, audio_file: discord.At
                     proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await proc.communicate()
                     if os.path.exists(op):
-                        await progress_msg.edit(content=f"{E_MOD} **8D Audio Activated**")
-                        await i.followup.send(file=discord.File(op))
+                        await process_and_send_audio_result(i, progress_msg, op, "8D Audio Filter Applied", use_embed=True)
                     else: await progress_msg.edit(content=f"{E_FAILED} Method failed.")
                 elif self.values[0] == "copyright":
                     cmd = ['ffmpeg', '-y', '-i', ip, '-af', "asetrate=48000*0.925,atempo=1.10,atempo=0.92,atempo=1.07,atempo=1.07,atempo=1.07", '-c:a', 'libvorbis', '-q:a', '4', op]
                     proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await proc.communicate()
                     if os.path.exists(op):
-                        await progress_msg.edit(content=f"{E_MOD} **Copyright Bypass Activated**")
-                        await i.followup.send(file=discord.File(op))
+                        await process_and_send_audio_result(i, progress_msg, op, "Copyright Bypass Filter Applied", use_embed=True)
                     else: await progress_msg.edit(content=f"{E_FAILED} Method failed.")
-            except: await progress_msg.edit(content=f"{E_FAILED} Error running filter.")
-            [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+            except Exception as e: await progress_msg.edit(content=f"{E_FAILED} Error running filter: {str(e)}")
+            if os.path.exists(ip):
+                try: os.remove(ip)
+                except: pass
+            if os.path.exists(op):
+                try: os.remove(op)
+                except: pass
     v = discord.ui.View(); v.add_item(MethodSelect(placeholder="Choose Bypass Method", options=[discord.SelectOption(label="8D Audio", value="8d"), discord.SelectOption(label="Copyright Bypass", value="copyright")]))
     await interaction.followup.send(content=f"{E_MOD} Select Method:", view=v)
 
@@ -831,18 +1049,22 @@ async def loudset(interaction: discord.Interaction, audio_file: discord.Attachme
                     proc = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     await proc.communicate()
                 else:
-                    def proc():
+                    def proc_audio():
                         with AudioFile(ip) as af: rs = get_loud_preset(self.values[0])(af.read(af.frames), af.samplerate)
                         tw = f"lt_{u}.wav"
                         with AudioFile(tw, 'w', af.samplerate, rs.shape[0]) as o: o.write(rs)
                         AudioSegment.from_file(tw).export(op, format="ogg"); os.remove(tw)
-                    await asyncio.get_event_loop().run_in_executor(None, proc)
+                    await asyncio.get_event_loop().run_in_executor(None, proc_audio)
                 if os.path.exists(op):
-                    await progress_msg.edit(content=f"{E_MOD} **Loud Preset {self.values[0]} Processed**")
-                    await i.followup.send(file=discord.File(op))
+                    await process_and_send_audio_result(i, progress_msg, op, f"LoudPreset_{self.values[0]}", use_embed=True)
                 else: await progress_msg.edit(content=f"{E_FAILED} File generation failed.")
-            except: await progress_msg.edit(content=f"{E_FAILED} Processing failed.")
-            [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+            except Exception as e: await progress_msg.edit(content=f"{E_FAILED} Processing failed: {str(e)}")
+            if os.path.exists(ip):
+                try: os.remove(ip)
+                except: pass
+            if os.path.exists(op):
+                try: os.remove(op)
+                except: pass
     v = discord.ui.View(); v.add_item(P(options=[discord.SelectOption(label=f"Preset {x}", value=str(x)) for x in range(1,14)]))
     await interaction.followup.send(content=f"{E_MOD} Select Preset:", view=v)
 
@@ -887,10 +1109,15 @@ async def pitch(interaction: discord.Interaction, audio_file: discord.Attachment
     def run(): subprocess.run(['ffmpeg', '-i', ip, '-af', f"asetrate={int(44100*val)},aresample=44100", '-c:a', 'libvorbis', '-q:a', '5', op, '-y'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
-        await status_msg.edit(content=f"{E_SUCCESS} Shifted Pitch perfectly.")
-        await interaction.followup.send(file=discord.File(op))
-    else: await status_msg.edit(content=f"{E_FAILED} Pitch alteration failed.")
-    [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+        await process_and_send_audio_result(interaction, status_msg, op, f"Pitch Shift ({val}x)", use_embed=True)
+    else: 
+        await status_msg.edit(content=f"{E_FAILED} Pitch alteration failed.")
+    if os.path.exists(ip):
+        try: os.remove(ip)
+        except: pass
+    if os.path.exists(op):
+        try: os.remove(op)
+        except: pass
 
 @bot.tree.command(name="tpos", description="Conjoins a bait segment cleanly in front of main track")
 @app_commands.describe(bait="Introductory sound asset", main="Primary track asset")
@@ -903,10 +1130,13 @@ async def tpos(interaction: discord.Interaction, bait: discord.Attachment, main:
     def run(): (AudioSegment.from_file(bp) + AudioSegment.from_file(mp)).export(op, format="ogg")
     await asyncio.get_event_loop().run_in_executor(None, run)
     if os.path.exists(op):
-        await status_msg.edit(content=f"{E_SUCCESS} Track structured cleanly.")
-        await interaction.followup.send(file=discord.File(op))
-    else: await status_msg.edit(content=f"{E_FAILED} Injection build failed.")
-    [os.remove(f) for f in [bp, mp, op] if os.path.exists(f)]
+        await process_and_send_audio_result(interaction, status_msg, op, "TPOS Conjoined Track", use_embed=True)
+    else: 
+        await status_msg.edit(content=f"{E_FAILED} Injection build failed.")
+    for f in [bp, mp, op]:
+        if os.path.exists(f):
+            try: os.remove(f)
+            except: pass
 
 @bot.tree.command(name="bait", description="Mixes track into pre-existing template option path")
 @app_commands.describe(choice="Type or select a template ID number", audio_file="Main audio file")
@@ -936,11 +1166,15 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
     try:
         await asyncio.get_event_loop().run_in_executor(None, run_bait_mixing)
         if os.path.exists(op):
-            await status_msg.edit(content=f"{E_SUCCESS} File mixed cleanly.")
-            await interaction.followup.send(file=discord.File(op))
+            await process_and_send_audio_result(interaction, status_msg, op, f"Bait Template #{clean_choice}", use_embed=True)
         else: await status_msg.edit(content=f"{E_FAILED} Build combination failed.")
     except Exception as e: await status_msg.edit(content=f"{E_FAILED} Processing failed: {str(e)}")
-    [os.remove(f) for f in [ip, op] if os.path.exists(f)]
+    if os.path.exists(ip):
+        try: os.remove(ip)
+        except: pass
+    if os.path.exists(op):
+        try: os.path.exists(op) and os.remove(op)
+        except: pass
 
 if __name__ == "__main__":
     if sys.platform == 'win32':
