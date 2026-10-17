@@ -37,11 +37,15 @@ try:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    import matplotlib.ticker as ticker
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    import matplotlib.ticker as ticker
 
 # --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
@@ -330,28 +334,51 @@ def analyze_audio_file(audio_path):
     try:
         audio = AudioSegment.from_file(audio_path)
         duration_sec = len(audio) / 1000.0
+        
         file_size_bytes = os.path.getsize(audio_path)
-        file_size_mb = f"{file_size_bytes / (1024 * 1024):.2f} MB"
+        file_size_mb = f"{file_size_bytes / (1024 * 1024):.3f} MB"
+        
         file_type = audio_path.split('.')[-1].lower()
         
         ffprobe_proc = subprocess.run(
-            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', audio_path],
+            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', audio_path],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         codec_name = file_type
         sample_rate_hz = audio.frame_rate
+        channels_count = audio.channels
+        bitrate_kbps = "N/A"
+        
         try:
             data = json.loads(ffprobe_proc.stdout)
+            fmt_info = data.get('format', {})
+            if 'bit_rate' in fmt_info:
+                bitrate_kbps = f"{int(fmt_info['bit_rate']) // 1000} kbps"
+            
             for stream in data.get('streams', []):
                 if stream.get('codec_type') == 'audio':
                     codec_name = stream.get('codec_name', file_type)
                     if 'sample_rate' in stream:
                         sample_rate_hz = int(stream['sample_rate'])
+                    if 'channels' in stream:
+                        channels_count = int(stream['channels'])
+                    if 'bit_rate' in stream and bitrate_kbps == "N/A":
+                        bitrate_kbps = f"{int(stream['bit_rate']) // 1000} kbps"
                     break
         except:
             pass
             
+        if bitrate_kbps == "N/A" and file_size_bytes > 0 and duration_sec > 0:
+            calc_br = int((file_size_bytes * 8) / duration_sec / 1000)
+            bitrate_kbps = f"{calc_br} kbps"
+
         quality_str = f"{file_type} {codec_name} {sample_rate_hz}Hz"
+        format_short = f"{file_type.upper()} {sample_rate_hz // 1000}kHz" if sample_rate_hz >= 1000 else f"{file_type.upper()} {sample_rate_hz}Hz"
+        channels_str = "Stereo" if channels_count > 1 else "Mono"
+        
+        minutes = int(duration_sec // 60)
+        seconds = int(duration_sec % 60)
+        duration_formatted = f"{minutes}:{seconds:02d}"
         
         vol_proc = subprocess.run(
             ['ffmpeg', '-i', audio_path, '-af', 'volumedetect', '-f', 'null', '-'],
@@ -359,20 +386,15 @@ def analyze_audio_file(audio_path):
         )
         stderr_out = vol_proc.stderr
         
-        peak_db = "N/A"
-        loudness_db = "N/A"
-        lowest_db = "N/A"
+        peak_dbfs = "N/A"
+        loudness_lufs = "N/A"
         
         m_max = re.search(r'max_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
-        if m_max: peak_db = f"{m_max.group(1)} dB"
+        if m_max: peak_dbfs = f"{m_max.group(1)} dBFS"
         
         m_mean = re.search(r'mean_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
-        if m_mean: loudness_db = f"{m_mean.group(1)} dB"
+        if m_mean: loudness_lufs = f"{m_mean.group(1)} LUFS"
         
-        m_min = re.search(r'min_volume:\s*(-?[\d\.]+)\s*dB', stderr_out)
-        if m_min: lowest_db = f"{m_min.group(1)} dB"
-        
-        # Lightweight downsampled stereo extraction (8kHz proxy)
         audio_small = audio.set_frame_rate(8000)
         raw_samples = np.array(audio_small.get_array_of_samples(), dtype=np.float32)
         if audio_small.channels > 1:
@@ -391,11 +413,14 @@ def analyze_audio_file(audio_path):
 
         return {
             "duration": duration_sec,
+            "duration_formatted": duration_formatted,
             "size": file_size_mb,
             "quality": quality_str,
-            "peak": peak_db,
-            "loudness": loudness_db,
-            "lowest": lowest_db,
+            "format": format_short,
+            "channels": channels_str,
+            "bitrate": bitrate_kbps,
+            "peak": peak_dbfs,
+            "loudness": loudness_lufs,
             "samples_l": samples_l,
             "samples_r": samples_r
         }
@@ -413,22 +438,20 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
             samples_r = analysis["samples_r"]
             duration_sec = analysis["duration"]
             
-            bg_color = '#FFFFFF'
-            border_color = '#E5C0D0'
-            wave_fill_l = '#E46B9B'
-            wave_fill_r = '#D45A8B'
-            wave_dark = '#4A152B'
-            text_color = '#D8A8BD'
-
-            fig, ax = plt.subplots(figsize=(9, 3.2), facecolor=bg_color, dpi=100)
-            ax.set_facecolor(bg_color)
+            bg_color = '#0B132B'
+            panel_color = '#1C2541'
+            border_color = '#00B4D8'
+            text_color = '#ADE8F4'
             
-            plt.subplots_adjust(top=0.82, bottom=0.22, left=0.08, right=0.96)
-            fig.text(0.5, 0.93, f"🎵 {title}", fontsize=11, color='#8A2B53', fontweight='bold', ha='center', va='center')
+            fig, ax = plt.subplots(figsize=(10, 3.6), facecolor=bg_color, dpi=100)
+            ax.set_facecolor(panel_color)
+            
+            plt.subplots_adjust(top=0.82, bottom=0.20, left=0.07, right=0.97)
+            fig.text(0.5, 0.93, f"🎵 {title}", fontsize=12, color='#90E0EF', fontweight='bold', ha='center', va='center')
             
             num_pts = len(samples_l)
-            if num_pts > 8000:
-                step = num_pts // 8000
+            if num_pts > 10000:
+                step = num_pts // 10000
                 samples_l = samples_l[::step]
                 samples_r = samples_r[::step]
                 num_pts = len(samples_l)
@@ -438,31 +461,54 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
             left_y = samples_l + 1.25
             right_y = samples_r - 1.25
             
-            ax.fill_between(time_axis, 1.25, left_y, color=wave_fill_l, alpha=0.95)
-            ax.plot(time_axis, left_y, color=wave_dark, linewidth=0.4, alpha=0.7)
+            points_l = np.array([time_axis, left_y]).T.reshape(-1, 1, 2)
+            segments_l = np.concatenate([points_l[:-1], points_l[1:]], axis=1)
+            norm_l = plt.Normalize(samples_l.min(), samples_l.max())
+            lc_l = LineCollection(segments_l, cmap='Blues', norm=norm_l, linewidth=1.2, alpha=0.9)
+            lc_l.set_array(samples_l[:-1])
+            ax.add_collection(lc_l)
+            ax.fill_between(time_axis, 1.25, left_y, color='#0077B6', alpha=0.45)
+
+            points_r = np.array([time_axis, right_y]).T.reshape(-1, 1, 2)
+            segments_r = np.concatenate([points_r[:-1], points_r[1:]], axis=1)
+            norm_r = plt.Normalize(samples_r.min(), samples_r.max())
+            lc_r = LineCollection(segments_r, cmap='Blues', norm=norm_r, linewidth=1.2, alpha=0.9)
+            lc_r.set_array(samples_r[:-1])
+            ax.add_collection(lc_r)
+            ax.fill_between(time_axis, -1.25, right_y, color='#03045E', alpha=0.55)
             
-            ax.fill_between(time_axis, -1.25, right_y, color=wave_fill_r, alpha=0.95)
-            ax.plot(time_axis, right_y, color=wave_dark, linewidth=0.4, alpha=0.7)
-            
-            ax.text(-0.03 * duration_sec, 1.25, 'L', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
-            ax.text(-0.03 * duration_sec, -1.25, 'R', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
+            ax.text(-0.025 * duration_sec, 1.25, 'L', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
+            ax.text(-0.025 * duration_sec, -1.25, 'R', color=text_color, fontsize=11, fontweight='bold', va='center', ha='right')
             
             for spine in ax.spines.values():
                 spine.set_edgecolor(border_color)
-                spine.set_linewidth(1.5)
+                spine.set_linewidth(1.8)
                 
             ax.set_xlim(0, duration_sec)
             ax.set_ylim(-2.6, 2.6)
             
+            ax.grid(True, linestyle='--', alpha=0.15, color='#90E0EF')
             ax.tick_params(axis='x', colors=text_color, labelsize=10, length=6, width=1.5, direction='out')
             ax.tick_params(axis='y', left=False, labelleft=False)
             
+            # Precise Timeline Formatting & AutoLocator Spacing
+            if duration_sec <= 10:
+                ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+            elif duration_sec <= 60:
+                ax.xaxis.set_major_locator(ticker.MultipleLocator(5))
+            elif duration_sec <= 300:
+                ax.xaxis.set_major_locator(ticker.MultipleLocator(30))
+            else:
+                ax.xaxis.set_major_locator(ticker.MaxNLocator(nbins=8))
+                
             def format_time(x, pos):
+                if x < 0: x = 0
+                if x > duration_sec: x = duration_sec
                 m = int(x // 60)
                 s = int(x % 60)
                 return f"{m}:{s:02d}"
                 
-            ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(format_time))
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_time))
             
             plt.savefig(img_path, dpi=100, facecolor=fig.get_facecolor(), edgecolor=border_color)
             plt.close(fig)
@@ -485,19 +531,20 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     if success_gen and os.path.exists(img_path):
         files_to_send.append(discord.File(img_path))
         
-    end_min = int(analysis['duration'] // 60)
-    end_sec = int(analysis['duration'] % 60)
-    
     embed = discord.Embed(
         title=f"🎵 {title}",
         color=0x0055ff
     )
-    embed.add_field(name="Quality & Format", value=f"`{analysis['quality']}`", inline=True)
-    embed.add_field(name="File Size", value=f"`{analysis['size']}`", inline=True)
+    # Match exact user reference layout fields while keeping requested quality string & 0.000 MB precision
+    embed.add_field(name="Duration", value=f"`{analysis['duration_formatted']}`", inline=True)
+    embed.add_field(name="Size", value=f"`{analysis['size']}`", inline=True)
+    embed.add_field(name="Bitrate", value=f"`{analysis['bitrate']}`", inline=True)
+    
+    embed.add_field(name="Format", value=f"`{analysis['format']}`\n`{analysis['quality']}`", inline=True)
+    embed.add_field(name="Channels", value=f"`{analysis['channels']}`", inline=True)
     embed.add_field(name="Loudness", value=f"`{analysis['loudness']}`", inline=True)
-    embed.add_field(name="Peak dB", value=f"`{analysis['peak']}`", inline=True)
-    embed.add_field(name="Lowest dB", value=f"`{analysis['lowest']}`", inline=True)
-    embed.add_field(name="Timeline", value=f"`Start: 00:00` ➔ `End: {end_min:02d}:{end_sec:02d}`", inline=False)
+    
+    embed.add_field(name="Peak", value=f"`{analysis['peak']}`", inline=True)
     
     if success_gen and os.path.exists(img_path):
         embed.set_image(url=f"attachment://{img_path}")
@@ -907,7 +954,6 @@ async def massupload(
     status_msg = await interaction.followup.send(content=f"{E_LDING} Reading raw file data into internal memory...")
     acc = AUTH_DATA[interaction.user.id]
     
-    # Read raw bytes once and clear immediately after iteration to save RAM
     raw_data = await audio_file.read()
     creator_key = "groupId" if acc["isGroup"] else "userId"
     await status_msg.edit(content=f"{E_LDING} Processing byte headers & sequential variation streams...")
@@ -931,7 +977,6 @@ async def massupload(
             line = f"<a:failed:1506265787900579994> Failed/Deleted! [{name}]{err_suffix}"
         status_lines.append(line)
 
-    # SEQUENTIAL BATCH PROCESSING: Prevents memory spikes from loading all 10 heavy audio arrays at once
     for idx in range(1, total_payloads + 1):
         num_stutters = idx - 1
         
@@ -944,7 +989,6 @@ async def massupload(
             
         variant_name = get_preset_title(style, idx, title)
         
-        # Upload one by one and immediately collect garbage
         await upload_burst(bot.session, processed_data, variant_name, acc["apikey"], acc["targetId"], creator_key, status_update_worker)
         
         del processed_data
