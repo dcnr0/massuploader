@@ -1,0 +1,14 @@
+app = "massuploader"
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+
+[env]
+  FLASK_APP = "bots.py" 
+
+[http_service]
+  internal_port = 10000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
