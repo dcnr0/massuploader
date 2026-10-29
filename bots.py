@@ -47,21 +47,16 @@ except ImportError:
     from matplotlib.collections import LineCollection
     import matplotlib.ticker as ticker
 
-# --- RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
+# --- FLY.IO / RENDER HEALTH CHECK KEEP-ALIVE SERVER ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is online and responding to Render health checks."
+    return "Bot is online and responding to health checks."
 
 def run_web_server():
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-
-def keep_alive():
-    t = Thread(target=run_web_server)
-    t.daemon = True
-    t.start()
 
 # --- CONFIG & ASSETS ---
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -124,7 +119,7 @@ BAIT_MAP = {
     "28": {"files": ["aspart1.ogg", "aspart2.ogg"], "type": "sandwich"},
     "29": {"files": ["aspart1.mp3", "aspart2.mp3"], "type": "sandwich"},
     "30": {"files": ["extra1_part1.ogg", "extra1_part2.ogg"], "type": "sandwich"},
-    "31": {"files": ["extra2_part1.mp3", "extra2_part2.ogg"], "type": "sandwich"},
+    "31": {"files": ["extra2_part1.mp3", "extra2_part2.mp3"], "type": "sandwich"},
     "32": {"files": ["477s.mp3", "477s 2.mp3"], "type": "sandwich"},
     "33": {"files": ["finally found it.mp3", "finally found it 2.mp3"], "type": "sandwich"}
 }
@@ -546,11 +541,9 @@ async def process_and_send_audio_result(interaction, status_msg, audio_path, tit
     embed.set_footer(text="zepti's massuploader")
         
     try:
-        # STEP 1: Send the processed audio file as a separate message first (bypasses combined 413 webhook limit)
         if os.path.exists(audio_path):
             await interaction.followup.send(file=discord.File(audio_path))
 
-        # STEP 2: Edit the status message to show the waveform image and full embed stats
         if success_gen and os.path.exists(img_path):
             await status_msg.edit(content=f"{E_SUCCESS} Processing completed successfully!", embed=embed, attachments=[discord.File(img_path)])
         else:
@@ -1284,5 +1277,11 @@ async def bait(interaction: discord.Interaction, choice: str, audio_file: discor
 if __name__ == "__main__":
     if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    keep_alive()
-    bot.run(TOKEN)
+    
+    # Run Discord Bot in a background thread
+    discord_thread = Thread(target=lambda: bot.run(TOKEN))
+    discord_thread.daemon = True
+    discord_thread.start()
+    
+    # Run Flask directly on the main thread so Fly.io's web service health check stays happy and online 24/7
+    run_web_server()
